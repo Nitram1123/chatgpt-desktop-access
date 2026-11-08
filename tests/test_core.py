@@ -1,6 +1,7 @@
 import importlib.util
 import ast
 from collections import deque
+import gettext
 import json
 import math
 import os
@@ -448,9 +449,12 @@ class StatusMessageTests(unittest.TestCase):
 
 	def test_package_builder_includes_docs_and_only_current_tiered_sounds(self):
 		paths = tuple(path.relative_to(PROJECT_ROOT).as_posix() for path in packageBuilder.packageFiles(PROJECT_ROOT))
-		for required in ("manifest.ini", "readme.md", "changelog.md", "LICENSE.txt"):
+		for required in (
+			"manifest.ini", "readme.md", "changelog.md", "LICENSE.txt",
+			"locale/fr/LC_MESSAGES/nvda.mo", "locale/fr/manifest.ini",
+		):
 			self.assertIn(required, paths)
-		self.assertEqual(65, len(paths))
+		self.assertEqual(67, len(paths))
 		self.assertIn("globalPlugins/codexStatusAnnouncer/attachmentDiagnostics.py", paths)
 		self.assertIn("globalPlugins/codexStatusAnnouncer/attachmentMenuDialog.py", paths)
 		self.assertEqual(51, sum(path.endswith(".wav") for path in paths))
@@ -459,6 +463,15 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertNotIn("globalPlugins/codexStatusAnnouncer/browserNavigatorDialog.py", paths)
 		self.assertFalse(any(path.startswith("globalPlugins/codexStatusAnnouncer/sounds/") and path.count("/") == 3 for path in paths))
 		self.assertFalse(any(path.endswith(".pot") for path in paths))
+		self.assertFalse(any(path.endswith(".po") for path in paths))
+
+	def test_french_catalog_translates_generated_labels_and_durations(self):
+		translate = gettext.translation("nvda", PROJECT_ROOT / "locale", languages=["fr_CA"]).gettext
+		self.assertEqual("Archiver le chat", translate("Archive chat"))
+		self.assertEqual((("123", "Tâche archivée 123"),), uniqueThreadLabels((("123", ""),), translate))
+		label = "Running command: git for 12 seconds"
+		self.assertIn("12 secondes", core.standardFullMessage(label, translate))
+		self.assertIn("12 secondes", core.minimalProfileMessage(label, translate, profile="informative"))
 
 	def test_release_workflow_publishes_and_rechecks_only_the_audited_public_package(self):
 		workflow = RELEASE_WORKFLOW_PATH.read_text(encoding="utf-8")

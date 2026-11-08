@@ -3399,7 +3399,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			)
 		codexRoot = Path(os.environ.get("CODEX_HOME") or (Path.home() / ".codex"))
 		try:
-			entries = uniqueThreadLabels(loadArchivedThreads(codexRoot))
+			entries = uniqueThreadLabels(loadArchivedThreads(codexRoot, translate=_), translate=_)
 			self._archivedChatHistoryCaches[mode] = tuple(title for threadId, title in entries)
 			self._archivedChatIds[mode] = {title: threadId for threadId, title in entries}
 			self._archivedChatHistoryLoaded[mode] = True

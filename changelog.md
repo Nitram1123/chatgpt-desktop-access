@@ -4,6 +4,16 @@ All notable changes to ChatGPT Desktop Access for NVDA, formerly Codex Access
 Toolkit and Codex Status Announcer, are recorded here. The active release line
 follows stable NVDA.
 
+## Unreleased
+
+- Added French translations for the add-on's settings, commands, and announcements.
+  Regional French settings use the same translation.
+
+### What to test
+
+- With NVDA set to French, open the add-on settings and pause and resume
+  announcements. Check that the settings and the two announcements are in French.
+
 ## 2026.2.19
 
 - Typing **/** or **@** in the message field announces ChatGPT's suggestion

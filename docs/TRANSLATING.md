@@ -1,7 +1,9 @@
 # Translating ChatGPT Desktop Access
 
-All user-facing Python strings use NVDA's gettext translation mechanism. The
-current template is `locale/chatGPTDesktopAccess.pot`.
+The add-on uses NVDA's gettext translation mechanism for its interface and
+announcements. The template is `locale/chatGPTDesktopAccess.pot`. ChatGPT's
+native control names and status text are recognized separately from these
+translations.
 
 ## Update the template
 
@@ -28,3 +30,7 @@ The generated template is deterministic. CI runs the same script with
 The package builder automatically includes compiled `nvda.mo` catalogs. Source
 `.po` files and the `.pot` template remain in the repository for translators but
 are not included in the installed add-on.
+
+To translate the add-on's description and release summary shown by NVDA, add
+`locale/<language>/manifest.ini` with the translated `description` and
+`changelog` fields. The package builder includes localized manifests.
