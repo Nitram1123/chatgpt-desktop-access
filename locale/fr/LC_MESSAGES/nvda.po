@@ -1714,3 +1714,11 @@ msgstr "Annoncer le titre du chat en cours"
 
 msgid "The chat title is unavailable"
 msgstr "Le titre du chat est indisponible"
+
+#: appModules/chatgpt.py
+msgid "Read the native task timer"
+msgstr "Lire le compteur natif de la tâche"
+
+#: globalPlugins/codexStatusAnnouncer/__init__.py
+msgid "No active task timer"
+msgstr "Aucun compteur de tâche actif"

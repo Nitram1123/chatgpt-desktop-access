@@ -11,6 +11,11 @@ follows stable NVDA.
   messages from their accessibility headings.
 - Added NVDA+Shift+C to read the current chat title. NVDA also announces the
   title when you switch to another chat.
+- Recurring progress feedback follows ChatGPT's native task timer. A new
+  assignable command, **Read the native task timer**, reports the displayed
+  duration or the current thinking state.
+- Outside ChatGPT, progress updates are sound-only and stop if the native timer
+  stops updating. Tasks without an exposed timer do not produce recurring cues.
 
 ### What to test
 
@@ -19,6 +24,11 @@ follows stable NVDA.
   most recent. Check that the shortcuts read both user and assistant messages.
 - Press NVDA+Shift+C inside a chat. Switch to another chat and check that NVDA
   announces its title once. Repeat from the chat history dialog.
+- Assign **Read the native task timer** in NVDA's Input Gestures dialog. Start a
+  Codex task and compare the spoken duration with the timer in the conversation.
+- Switch to another chat or another app while the task is running. Check that
+  the previous chat's progress stops and that any progress heard outside
+  ChatGPT comes from new timer updates.
 
 ## 2026.2.20
 

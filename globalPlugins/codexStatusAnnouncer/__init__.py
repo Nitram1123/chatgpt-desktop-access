@@ -41,8 +41,14 @@ from .attachmentDiagnostics import AttachmentMenuDiagnostics
 from .attachmentMenuDialog import AttachmentMenuDialog
 from .chatHistoryDialog import ChatHistoryDialog
 from .messageListDialog import MessageListDialog
-from .core import AnnouncementHistory, CATEGORY_SETTING, ChatMessageAccumulator, ChatMessageFieldCollector, announcementPriority, attachmentMenuItemLabel, backgroundActivityName, brailleStatusMessage, brailleTypingGestureCommitsText, bufferInspectionDue, categoryOutputActions, changelogForDisplay, chatActionMatches, chatHistorySnapshotDecision, chatTitleMatches, codexHistorySourceSignature, codexThreadUrl, coalescedPollDelay, completedTextDelta, confirmedUserMessageSubmission, conversationModeFromDocumentNames, conversationModeFromSwitchControl, conversationWindowShouldDetach, currentActivitySummary, duplicateChannelActions, elapsedSeconds, firstStatusLabel, focusStateTransition, formatCommandSpeech, formatCustomAnnouncement, formatElapsedDuration, intermediateCompletionCategory, isBrailleTypingGestureIdentifier, isChatHistoryConversationBoundary, attachmentOptionKeyStep, attachmentPopupOptions, findAttachmentOption, promptTextAddition, isChatHistoryInterfaceText, isCodexPromptLabel, isConversationNavigationGestureIdentifier, isKnownNonStatusButton, isPermissionDecisionLabel, isPermissionPromptText, isPromptSubmissionGestureIdentifier, isResponseCompletionMarkerText, isStopControlLabel, isTaskCompletionLabel, loadActiveCodexThreadTitles, mergeConversationTail, loadArchivedThreads, looksLikeBlankCodexConversation, looksLikeCodexConversation, mergeSupportedAppNames, modeSpecificRecentChatTitles, nextBusyState, outputActions, pendingChatTitle, pluginInstallProgress, pluginProgressBusyTransition, pollDelay, previewSelection, promptControlKind, promptSubmissionGestureShouldStart, redactSensitive, repairConfigurationValues, responseCompletionScanMarker, responseCompletionTransition, shouldFinalizeResponseCompletion, shouldLogDiagnosticSnapshot, shouldPlayContinuousWorkingClick, shouldPreserveBrailleComposition, shouldReplaceScheduledPoll, shouldSuppressNativeConversationUpdate, shouldSuppressRoutineBraille, shouldSuppressSemanticDuplicate, soundKey, statusDetails, statusMessage, stopControlTransition, supersedesResponseCompletionCandidate, uniqueThreadLabels, usageLimitNotice, userMessageNumber, userMessageSubmissionTransition, viewerTitleMatches
+from .bufferUpdates import BufferUpdateObserver
+from .core import AnnouncementHistory, CATEGORY_SETTING, ChatMessageAccumulator, ChatMessageFieldCollector, announcementPriority, attachmentMenuItemLabel, brailleStatusMessage, brailleTypingGestureCommitsText, bufferInspectionDue, categoryOutputActions, changelogForDisplay, chatActionMatches, chatHistorySnapshotDecision, chatTitleMatches, codexHistorySourceSignature, codexThreadUrl, coalescedPollDelay, completedTextDelta, confirmedUserMessageSubmission, conversationModeFromDocumentNames, conversationModeFromSwitchControl, conversationWindowShouldDetach, currentActivitySummary, duplicateChannelActions, firstStatusLabel, focusStateTransition, formatCommandSpeech, formatCustomAnnouncement, formatElapsedDuration, intermediateCompletionCategory, isBrailleTypingGestureIdentifier, isChatHistoryConversationBoundary, attachmentOptionKeyStep, attachmentPopupOptions, findAttachmentOption, promptTextAddition, isChatHistoryInterfaceText, isCodexPromptLabel, isConversationNavigationGestureIdentifier, isKnownNonStatusButton, isPermissionDecisionLabel, isPermissionPromptText, isPromptSubmissionGestureIdentifier, isResponseCompletionMarkerText, isStopControlLabel, isTaskCompletionLabel, loadActiveCodexThreadTitles, mergeConversationTail, loadArchivedThreads, looksLikeBlankCodexConversation, looksLikeCodexConversation, mergeSupportedAppNames, modeSpecificRecentChatTitles, nextBusyState, outputActions, pendingChatTitle, pluginInstallProgress, pluginProgressBusyTransition, pollDelay, previewSelection, promptControlKind, promptSubmissionGestureShouldStart, redactSensitive, repairConfigurationValues, responseCompletionScanMarker, responseCompletionTransition, shouldFinalizeResponseCompletion, shouldLogDiagnosticSnapshot, shouldPlayContinuousWorkingClick, shouldPreserveBrailleComposition, shouldReplaceScheduledPoll, shouldSuppressNativeConversationUpdate, shouldSuppressRoutineBraille, shouldSuppressSemanticDuplicate, soundKey, statusDetails, statusMessage, stopControlTransition, supersedesResponseCompletionCandidate, uniqueThreadLabels, usageLimitNotice, userMessageNumber, userMessageSubmissionTransition, viewerTitleMatches
 from .core import voiceControlKind
+from .core import (
+	NATIVE_TASK_TIMER_PREFIXES,
+	chatMessageHeadingSpeaker, chatMessageSpeaker, isNativeThinkingControl, isNativeThinkingLabel,
+	nativeActiveTaskSeconds, nativeTaskTimer,
+)
 from .core import attachmentPopupStructureSummary, isAttachmentButtonLikeLabel
 from .core import chatGPTAppVersionSummary, otherComposerMode, selectedComposerMode
 from .core import chatGPTCompatibilityFindings, submittedTurnFinishedUnseen
@@ -1479,6 +1485,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._latestFullMessage = ""
 		self._haveBaseline = False
 		self._buffer = None
+		self._nativeTimerObserver = BufferUpdateObserver(self._observeNativeTaskTimer)
+		self._nativeTimerDocument = ""
+		self._nativeTimerSeconds = None
+		self._nativeTimerTurn = None
+		self._nativeHeartbeatAt = None
+		self._nativeClickAt = None
 		self._unsupportedScanBuffer = None
 		self._conversationWindowHandle = 0
 		self._conversationWindowUnavailableAt = 0.0
@@ -1510,17 +1522,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._monitoringAnnounced = False
 		self._lastNoStatusLogAt = 0.0
 		self._active = False
-		self._lastHeartbeatAt = 0.0
 		self._busy = False
+		self._busyTimeout = None
 		self._backgroundPulseCount = 0
 		self._commentaryOffsets = {}
 		self._paused = False
 		self._speechHistory = AnnouncementHistory(20)
 		self._brailleHistory = AnnouncementHistory(20)
 		self._history = self._speechHistory
-		self._busyStartedAt = 0.0
 		self._activeCategory = "other"
-		self._lastProgressSoundAt = 0.0
 		self._appFocusState = None
 		self._lastExternalFocusObject = None
 		self._lastExternalFocusWindowHandle = 0
@@ -1536,7 +1546,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._latestUserMessageNumber = None
 		self._pendingUserMessageIncrease = False
 		self._stopControlVisible = False
-		self._continuousClicksStartAt = 0.0
 		self._lastStateReason = "startup"
 		self._lastSubmissionSignal = "none"
 		self._documentSwitchCount = 0
@@ -1646,6 +1655,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def terminate(self):
 		global _activePluginInstance
+		self._nativeTimerObserver.detach()
+		self._clearNativeTaskTimer()
+		if self._busyTimeout is not None:
+			self._busyTimeout.Stop()
+			self._busyTimeout = None
 		_stopProgressSounds()
 		self._conversationModeProbeGeneration += 1
 		self._conversationModeProbePendingGeneration = 0
@@ -1759,6 +1773,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			log.debugWarning("Unable to save the last displayed add-on version", exc_info=True)
 
 	def _resetTaskState(self, reason):
+		self._bindNativeTaskTimer(self._buffer)
 		self._setBusy(False, reason)
 		self._resetAttachmentMenuTracking()
 		self._cancelAttachmentSourceFocus()
@@ -1789,7 +1804,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._latestUserMessageNumber = None
 		self._pendingUserMessageIncrease = False
 		self._stopControlVisible = False
-		self._continuousClicksStartAt = 0.0
 		self._lastUnknownButtons = ()
 		self._lastUnknownButtonsAt = 0.0
 		self._latestResponseMarker = None
@@ -1809,7 +1823,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._lastBrailleMessage = ""
 		self._lastBrailleMessageAt = 0.0
 		self._activeCategory = "other"
-		self._backgroundPulseCount = 0
 
 	def _recordHistory(self, speechMessage, brailleMessage=None):
 		brailleText = str(brailleMessage if brailleMessage is not None else speechMessage or "").strip()
@@ -1906,6 +1919,166 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			return self._recentChatMessages
 		self._cacheRecentChatMessages(self._activeBranchMessages(10))
 		return self._recentChatMessages
+
+	def _readNativeTaskTimer(self, includeThinking=False):
+		buffer = self._buffer
+		if buffer is None:
+			return "", None
+		prompt = self._findChatGPTPromptObject()
+		try:
+			info = buffer.makeTextInfo(prompt if prompt is not None else textInfos.POSITION_LAST)
+			info.collapse()
+		except Exception:
+			info = buffer.makeTextInfo(textInfos.POSITION_LAST)
+		_extendScanStart(info, RECENT_CHAT_INITIAL_SCAN_CHARACTERS)
+		label = ""
+		textField = {}
+		timerObject = None
+		pendingPrefix = ""
+		turn = None
+		thinking = False
+		thinkingFields = []
+		for item in info.getTextWithFields():
+			if isinstance(item, str):
+				lines = item.splitlines()
+				sourceObject = (textField.get("ia2TextWindowHandle"), textField.get("ia2TextUniqueID"))
+			elif item.command == "formatChange":
+				textField = item.field or {}
+				continue
+			elif item.command == "controlStart":
+				field = item.field or {}
+				lines = [str(field.get("name") or "")]
+				sourceObject = (field.get("controlIdentifier_docHandle"), field.get("controlIdentifier_ID"))
+				if includeThinking:
+					thinkingFields.append(
+						bool(thinkingFields and thinkingFields[-1])
+						or isNativeThinkingControl(field.get(ATTACHMENT_POPUP_CLASS_KEY)),
+					)
+				if chatMessageHeadingSpeaker(field, Role.HEADING, State.FOCUSABLE) == "user":
+					label, timerObject, pendingPrefix = "", None, ""
+					turn = sourceObject if all(sourceObject) else None
+					thinking = False
+			elif item.command == "controlEnd":
+				if thinkingFields:
+					thinkingFields.pop()
+				continue
+			else:
+				continue
+			for line in lines:
+				if chatMessageSpeaker(line) == "user":
+					label, timerObject, pendingPrefix = "", None, ""
+					thinking = False
+				if includeThinking and isResponseCompletionMarkerText(line):
+					thinking = False
+				if includeThinking and not thinking and isNativeThinkingLabel(line):
+					thinking = bool(thinkingFields and thinkingFields[-1])
+					if not thinking and all(sourceObject):
+						# Some Chromium ranges expose the class only on the live object.
+						try:
+							obj = buffer.getNVDAObjectFromIdentifier(*map(int, sourceObject))
+							thinking = isNativeThinkingControl(_domClassNames(obj)) or isNativeThinkingControl(
+								_domClassNames(getattr(obj, "parent", None)),
+							)
+						except Exception:
+							pass
+				timer = nativeTaskTimer(line)
+				if isinstance(item, str) and line.strip():
+					if pendingPrefix and not timer:
+						timer = nativeTaskTimer(f"{pendingPrefix} {line}")
+					normalized = " ".join(line.casefold().split())
+					pendingPrefix = normalized if normalized in NATIVE_TASK_TIMER_PREFIXES else ""
+				if timer:
+					label = timer
+					timerObject = sourceObject
+		if timerObject and all(timerObject):
+			try:
+				obj = buffer.getNVDAObjectFromIdentifier(*map(int, timerObject))
+				current = nativeTaskTimer(getattr(obj, "name", "")) or nativeTaskTimer(getattr(obj, "value", ""))
+				if current:
+					label = current
+			except Exception:
+				# Some Chromium ranges expose only virtual-buffer text.
+				pass
+		if thinking and not label:
+			label = "Thinking"
+		return label, turn
+
+	def _reportNativeTaskTimer(self):
+		self._rememberBuffer(api.getFocusObject(), allowUnclassifiedConversation=True)
+		try:
+			label, _turn = self._readNativeTaskTimer(includeThinking=True)
+		except NotImplementedError:
+			label = ""
+		if label == "Thinking":
+			label = _("Thinking")
+		elif nativeActiveTaskSeconds(label) is None:
+			label = _("No active task timer")
+		ui.message(label)
+
+	def _bindNativeTaskTimer(self, buffer):
+		self._clearNativeTaskTimer()
+		self._nativeTimerDocument = ""
+		self._nativeTimerObserver.attach(buffer)
+
+	def _clearNativeTaskTimer(self):
+		if self._nativeTimerSeconds is not None:
+			_discardPendingActivitySounds()
+		self._nativeTimerSeconds = None
+		self._nativeTimerTurn = None
+		self._nativeHeartbeatAt = None
+		self._nativeClickAt = None
+		self._backgroundPulseCount = 0
+
+	def _observeNativeTaskTimer(self, buffer):
+		if buffer is not self._buffer:
+			return
+		if not self._conversationWindowIsAvailable(self._conversationWindowHandle):
+			self._clearNativeTaskTimer()
+			return
+		if self._attachmentMenuFlowActive() or self._brailleCompositionActive:
+			return
+		# Chromium may retain the same buffer when opening a different chat.
+		document = buffer.rootNVDAObject.name or ""
+		if document and document != self._nativeTimerDocument:
+			if self._nativeTimerDocument:
+				self._clearNativeTaskTimer()
+				self._lastPromptObject = None
+			self._nativeTimerDocument = document
+		label, turn = self._readNativeTaskTimer()
+		seconds = nativeActiveTaskSeconds(label)
+		if seconds is None:
+			self._clearNativeTaskTimer()
+			return
+		newTurn = turn and self._nativeTimerTurn and turn != self._nativeTimerTurn
+		if self._nativeTimerSeconds is None or seconds < self._nativeTimerSeconds or newTurn:
+			self._clearNativeTaskTimer()
+			self._nativeTimerTurn = turn
+			self._nativeTimerSeconds = self._nativeHeartbeatAt = seconds
+			return
+		self._nativeTimerTurn = turn or self._nativeTimerTurn
+		if seconds == self._nativeTimerSeconds:
+			return
+		self._nativeTimerSeconds = seconds
+		conf = _settings()
+		if self._paused or not conf["announceWorking"] or seconds >= conf["maximumBusyMinutes"] * 60:
+			return
+		mode = conf[CATEGORY_OUTPUT_CONFIG["working"]]
+		actions = categoryOutputActions(mode, conf["speech"], conf["braille"], conf["soundWhenSpeechUnavailable"])
+		if conf["announceHeartbeat"] and seconds - self._nativeHeartbeatAt >= conf["workingIntervalSeconds"]:
+			self._nativeHeartbeatAt = seconds
+			pulseActions = actions.copy()
+			if self._appFocusState is False or not self._conversationWindowOwnsForeground(self._conversationWindowHandle):
+				pulseActions.update(speech=False, braille=False)
+			if any(pulseActions.values()) and self._announceBackgroundPulse(seconds, conf, pulseActions):
+				self._nativeClickAt = seconds
+		if seconds * 1000 < conf["workingClickStartDelayMs"]:
+			return
+		sinceClick = float("inf") if self._nativeClickAt is None else seconds - self._nativeClickAt
+		if shouldPlayContinuousWorkingClick(
+			True, conf["continuousWorkingClicks"], conf["progressSoundStyle"], actions["sound"],
+			sinceClick, conf["workingClickIntervalMs"] / 1000,
+		) and _playProgressSound("working", _("Working"), conf["progressSoundStyle"], conf["clickVolume"]):
+			self._nativeClickAt = seconds
 
 	def _activeBranchMessages(self, limit):
 		"""Scan back from the active prompt until enough turns or the start is found."""
@@ -4425,6 +4598,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 					log.debug("ChatGPT Desktop Access refreshed the Chromium virtual buffer without resetting task state")
 			if self._buffer is not buffer:
 				self._unsupportedScanBuffer = None
+				self._bindNativeTaskTimer(buffer)
 			self._buffer = buffer
 			if wasMissing or bufferChanged:
 				self._conversationWindowHandle = candidateWindowHandle
@@ -4478,7 +4652,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			return cue
 		category = "monitoringActive" if cue == "active" else "monitoringInactive"
 		_playProgressSound(category, cue, conf["progressSoundStyle"], conf["clickVolume"])
-		self._lastProgressSoundAt = time.monotonic()
 		return cue
 
 	def _scheduleConversationEntryCorrection(self, obj):
@@ -5736,7 +5909,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._latestFullMessage = ""
 		self._lastMessage = ""
 		self._lastMessageAt = 0.0
-		self._backgroundPulseCount = 0
 		self._pendingResponseCompletionAt = 0.0
 		self._lastSubmissionSignal = reason
 		self._active = True
@@ -5750,9 +5922,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				_playProgressSound(
 					"submission", _("Prompt submitted"), conf["progressSoundStyle"], conf["clickVolume"],
 				)
-				self._lastProgressSoundAt = time.monotonic()
-		else:
-			self._announceContinuousWorkingClick(force=True)
 		log.info("ChatGPT Desktop Access submission detected: %s", reason)
 
 	def _queueResponseCompletion(self):
@@ -6060,19 +6229,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self._queueResponseCompletion()
 		return latest
 
-	def _shouldAnnounce(self, label, category):
+	def _shouldAnnounce(self, category):
 		conf = _settings()
-		if not conf[CATEGORY_SETTING[category]] or conf[CATEGORY_OUTPUT_CONFIG.get(category, "outputOther")] == "off":
-			return False
-		seconds = elapsedSeconds(label)
-		if category == "working" and seconds is not None:
-			interval = conf["workingIntervalSeconds"]
-			return seconds == 0 or seconds % interval == 0
-		return True
+		return conf[CATEGORY_SETTING[category]] and conf[CATEGORY_OUTPUT_CONFIG.get(category, "outputOther")] != "off"
 
 	def _announceLabel(self, label):
 		category, safeMessage = statusDetails(label)
-		if not category:
+		if not category or nativeTaskTimer(label):
 			return
 		if shouldSuppressTrailingCompletion(category, self._busy, self._lastStateReason, label):
 			log.debug("ChatGPT Desktop Access ignored an operation completion after task end")
@@ -6083,18 +6246,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			return
 		# Explicit Codex activity owns the busy state from this point onward.
 		self._pluginProgressOwnedBusy.clear()
-		# New work supersedes a tentative virtual-buffer completion. Intermediate
-		# completion labels must preserve it so trailing Chromium events cannot
-		# leave the continuous Working sound active indefinitely.
+		# New work supersedes a tentative response-completion announcement.
 		if supersedesResponseCompletionCandidate(label):
 			self._pendingResponseCompletionAt = 0.0
-		stateCategory = category if category != "completion" or isTaskCompletionLabel(label) else ""
+		taskCompletion = category == "completion" and isTaskCompletionLabel(label)
+		stateCategory = category if category != "completion" or taskCompletion else ""
 		self._setBusy(nextBusyState(self._busy, stateCategory), category)
+		if category == "working":
+			return
 		if category != "completion":
 			self._activeCategory = category
-		elif not isTaskCompletionLabel(label):
+		elif not taskCompletion:
 			self._activeCategory = intermediateCompletionCategory(label) or self._activeCategory
-		if not self._shouldAnnounce(label, category):
+		if not self._shouldAnnounce(category):
 			return
 		conf = _settings()
 		message = statusMessage(
@@ -6115,9 +6279,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		log.info("ChatGPT Desktop Access detected activity: %s", safeMessage)
 		self._latestMessage = message
 		fallbackPlayed = self._speakOnce(message, category, action, priority, brailleMessage)
-		if fallbackPlayed:
-			self._lastProgressSoundAt = time.monotonic()
-		self._lastHeartbeatAt = time.monotonic()
 		completionMode = conf[CATEGORY_OUTPUT_CONFIG["completion"]]
 		if category == "completion" and conf["completionSound"] and completionMode in ("all", "sound") and not fallbackPlayed:
 				_safeBeep(880, 80)
@@ -6128,8 +6289,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if label and label != self._lastLabel and supersedesResponseCompletionCandidate(label):
 			self._pendingResponseCompletionAt = 0.0
 		if not label:
-			if not self._busy:
-				self._lastHeartbeatAt = 0.0
 			if not self._haveBaseline:
 				self._haveBaseline, self._lastLabel = True, ""
 				log.info("ChatGPT Desktop Access baseline established: no activity")
@@ -6145,7 +6304,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			baselineCategory = statusDetails(label)[0]
 			stateCategory = baselineCategory if baselineCategory != "completion" or isTaskCompletionLabel(label) else ""
 			self._setBusy(nextBusyState(self._busy, stateCategory), "baseline")
-			self._lastHeartbeatAt = now
 			return
 		if label != self._lastLabel:
 			self._lastLabel = label
@@ -6162,8 +6320,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				conversationDetached = self._detachConversationIfWindowClosed(now)
 			if self._buffer is None and not conversationDetached:
 				self._rememberBuffer(api.getFocusObject())
-			if self._busy and self._busyStartedAt and now - self._busyStartedAt >= _settings()["maximumBusyMinutes"] * 60:
-				self._setBusy(False, "maximum activity timeout")
 			if self._buffer:
 				if not self._conversationModeObserved and (
 					not self._lastConversationModeProbeAt
@@ -6226,20 +6382,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				self._haveBaseline, self._lastLabel = True, "Response complete"
 				self._announceLabel("Response complete")
 			self._active = bool(self._lastScannedLabel) or self._busy
-			if self._busy:
-				# This is lightweight and internally rate-limited; it must not force a
-				# virtual-buffer traversal merely to maintain background feedback.
-				self._announceBackgroundPulse()
 		except Exception:
 			log.debugWarning("ChatGPT Desktop Access polling housekeeping failed", exc_info=True)
 			self._lastInspectionError = "polling housekeeping failed"
 		finally:
-			if self._timer is not None:
-				self._announceContinuousWorkingClick()
-				if self._timer is pollTimer:
-					delay = pollDelay(self._active, _settings()["idlePollMs"])
-					self._timer = wx.CallLater(delay, self._poll)
-					self._nextPollAt = time.monotonic() + delay / 1000.0
+			if self._timer is pollTimer and pollTimer is not None:
+				delay = pollDelay(self._active, _settings()["idlePollMs"])
+				self._timer = wx.CallLater(delay, self._poll)
+				self._nextPollAt = time.monotonic() + delay / 1000.0
 
 	def _speakOnce(
 		self, message, category="other", soundCategory=None, priority=None,
@@ -6283,8 +6433,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		)
 
 	def _setBusy(self, busy, reason):
+		# The compatibility scanner and plugin installer still use this state.
+		# Recurring task feedback is driven separately by the native timer.
 		busy = bool(busy)
-		if not busy:
+		if not busy and self._nativeTimerSeconds is None:
 			_discardPendingActivitySounds()
 		if busy == self._busy:
 			self._lastStateReason = reason
@@ -6294,60 +6446,23 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self._submittedTurnUnconfirmedAt = 0.0
 		self._lastStateReason = reason
 		if busy:
-			self._busyStartedAt = time.monotonic()
-			self._lastProgressSoundAt = self._busyStartedAt
-			self._continuousClicksStartAt = self._busyStartedAt + _settings()["workingClickStartDelayMs"] / 1000.0
+			self._busyTimeout = wx.CallLater(_settings()["maximumBusyMinutes"] * 60000, self._expireBusyState)
+		elif self._busyTimeout is not None:
+			self._busyTimeout.Stop()
+			self._busyTimeout = None
 		log.info(
 			"ChatGPT Desktop Access background state: %s (%s)",
 			"active" if busy else "idle", reason,
 		)
-		if not busy:
-			self._lastHeartbeatAt = 0.0
-			self._busyStartedAt = 0.0
-			self._continuousClicksStartAt = 0.0
 
-	def _announceContinuousWorkingClick(self, force=False):
-		# A completion marker can arrive before the stop control disappears.
-		# Keep state confirmation, but stop ticking during that settling period.
-		# Genuine new activity clears this candidate and permits ticks again.
-		if self._pendingResponseCompletionAt:
-			return
-		conf = _settings()
-		now = time.monotonic()
-		if not force and now < self._continuousClicksStartAt:
-			return
-		mode = conf[CATEGORY_OUTPUT_CONFIG.get(self._activeCategory, "outputOther")]
-		actions = categoryOutputActions(mode, conf["speech"], conf["braille"], conf["soundWhenSpeechUnavailable"])
-		interval = 0.0 if force else conf["workingClickIntervalMs"] / 1000.0
-		if not shouldPlayContinuousWorkingClick(
-			self._busy, conf["continuousWorkingClicks"] and not self._paused,
-			conf["progressSoundStyle"], actions["sound"],
-			now - self._lastProgressSoundAt, interval,
-		):
-			return
-		if _playProgressSound("working", _("Working"), conf["progressSoundStyle"], conf["clickVolume"]):
-			self._lastProgressSoundAt = now
+	def _expireBusyState(self):
+		self._busyTimeout = None
+		self._setBusy(False, "maximum activity timeout")
 
-	def _announceBackgroundPulse(self):
-		if self._pendingResponseCompletionAt:
-			return
-		conf = _settings()
-		if not self._busy or not conf["announceHeartbeat"]:
-			return
-		now = time.monotonic()
-		if not self._lastHeartbeatAt:
-			self._lastHeartbeatAt = now
-			return
-		if now - self._lastHeartbeatAt < conf["workingIntervalSeconds"]:
-			return
-		self._lastHeartbeatAt = now
+	def _announceBackgroundPulse(self, elapsed, conf, actions):
 		self._backgroundPulseCount += 1
 		toneCategory = "backgroundPulse1" if self._backgroundPulseCount % 2 else "backgroundPulse2"
-		elapsed = max(0, round(now - self._busyStartedAt)) if self._busyStartedAt else 0
-		# Use the original detailed status, not customized speech. A custom template
-		# may omit words such as "finished" and must not make a completed file step
-		# sound as though it is still editing.
-		name = _(backgroundActivityName(self._activeCategory, self._latestFullMessage))
+		name = _("Processing")
 		duration = formatElapsedDuration(elapsed, _)
 		fullMessage = _("{activity} still running, {duration}").format(activity=name, duration=duration)
 		minimalProfile = conf["minimalSpeechProfile"]
@@ -6359,20 +6474,15 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			message = fullMessage
 		if message:
 			message = _customizeAnnouncement(message, toneCategory, name, elapsed)
-		mode = conf[CATEGORY_OUTPUT_CONFIG.get(self._activeCategory, "outputOther")]
-		actions = categoryOutputActions(mode, conf["speech"], conf["braille"], conf["soundWhenSpeechUnavailable"])
 		if shouldSuppressRoutineBraille(
 			conf["protectBrailleReading"], self._appFocusState, toneCategory, "low",
 			self._conversationBrowseModeActive(),
 		):
 			actions["braille"] = False
-		if not self._paused:
-			played = _send(
-				message, actions["speech"] and bool(message), actions["braille"], toneCategory,
-				actions["sound"], priority="low", brailleMessage=fullMessage,
-			)
-			if played:
-				self._lastProgressSoundAt = time.monotonic()
+		return _send(
+			message, actions["speech"] and bool(message), actions["braille"], toneCategory,
+			actions["sound"], priority="low", brailleMessage=fullMessage,
+		)
 
 	def _isSidebarChatButton(self, obj, label):
 		"""True for a chat title in ChatGPT's sidebar or menus, which can read like progress.
@@ -6419,6 +6529,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		text = " ".join(str(getattr(obj, "name", "") or getattr(obj, "value", "") or "").split())
 		if not text:
 			return False
+		if nativeTaskTimer(text):
+			return True
 		category = statusDetails(text)[0]
 		if category:
 			# Chromium can expose completion and progress as a non-button live region.
@@ -6450,8 +6562,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			# It may refresh an active task, but must never restart one.
 			self._pluginProgressOwnedBusy.clear()
 			self._setBusy(nextBusyState(self._busy, commentary=True), "commentary")
-			if self._busy:
-				self._lastHeartbeatAt = time.monotonic()
 			log.info("ChatGPT Desktop Access detected activity: Commentary update")
 			conf = _settings()
 			fullMessage = redactSensitive(message) if conf["redactSensitive"] else message
@@ -6473,10 +6583,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	@script(description=_("Report current Codex activity or repeat the latest message"))
 	def script_repeatLatestStatus(self, gesture):
-		elapsed = time.monotonic() - self._busyStartedAt if self._busyStartedAt else 0
+		elapsed = self._nativeTimerSeconds
 		agentName = _("ChatGPT") if self._conversationMode == "chatgpt" else _("Codex")
 		message = currentActivitySummary(
-			self._busy, self._activeCategory, self._latestMessage, elapsed, _, agentName,
+			elapsed is not None, "working", self._latestMessage, elapsed, _, agentName,
 		)
 		conf = _settings()
 		_send(

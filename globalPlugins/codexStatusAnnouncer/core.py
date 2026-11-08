@@ -41,6 +41,28 @@ MODE_SWITCH_BUTTON_LABELS = (
 	"Current mode: ChatGPT", "Current mode: Codex",
 	"Switch mode: ChatGPT", "Switch mode: Codex", "Switch mode",
 )
+LOCALIZED_WORKING_DURATION_PREFIXES = (
+	"en cours depuis ", "traitement en cours depuis ", "en proceso desde hace ", "procesando desde hace ",
+	"in bearbeitung seit ", "a trabalhar há ", "processando há ", "in elaborazione da ", "s’està treballant des de fa ",
+)
+LOCALIZED_THINKING_LABELS = frozenset((
+	"en réflexion", "réflexion en cours", "pensando", "denke nach", "a pensar", "sto pensando", "s’està pensant",
+))
+NATIVE_ACTIVE_TASK_TIMER_PREFIXES = ("working for ", *LOCALIZED_WORKING_DURATION_PREFIXES)
+NATIVE_TASK_TIMER_PREFIXES = (
+	"worked for", "a travaillé pendant", "exécution durant", "durée d’exécution :",
+	*(prefix.strip() for prefix in NATIVE_ACTIVE_TASK_TIMER_PREFIXES),
+)
+NATIVE_TASK_TIMER_UNIT_PATTERN = re.compile(
+	r"(\d+)\s*(hours?|heures?|hrs?|std|minuten|minutes?|minuti?|minutos?|mins?|"
+	r"seconds?|secondes?|sekunden?|segundos?|secondi|secs?|sek|seg|[hms])\.?\s*",
+	re.IGNORECASE,
+)
+NATIVE_TASK_TIMER_PATTERN = re.compile(
+	r"(?:" + "|".join(map(re.escape, NATIVE_TASK_TIMER_PREFIXES)) + r") "
+	r"(\d+(?::\d{2}){1,2}|(?:" + NATIVE_TASK_TIMER_UNIT_PATTERN.pattern + r"){1,3})",
+	re.IGNORECASE,
+)
 # The Chat and Work switch above a new chat's message field.
 COMPOSER_MODE_GROUP_NAME = "Composer mode"
 # Menus that keep focus in the message field (Add files and more, "/", "@"):
@@ -619,6 +641,47 @@ def chatMessageHeadingSpeaker(field, headingRole, focusableState):
 		return ""
 	# The app uses tabindex=-1 only on assistant headings.
 	return "assistant" if focusableState in (field.get("states") or ()) else "user"
+
+
+def nativeTaskTimer(label):
+	"""Recognize the app's short elapsed-time label without reading surrounding prose."""
+	text = " ".join(str(label or "").split())
+	return text if NATIVE_TASK_TIMER_PATTERN.fullmatch(text) else ""
+
+
+def isNativeThinkingLabel(label):
+	text = " ".join(str(label or "").casefold().split()).rstrip(".…")
+	return text in ("thinking", "réflexion", "en cours de réflexion") or text in LOCALIZED_THINKING_LABELS
+
+
+def isNativeThinkingControl(classes):
+	classes = str(classes or "").split()
+	# The animation can be disabled while the dedicated status wrapper remains.
+	return any(name.startswith("cadencedShimmer-") for name in classes) or {
+		"min-w-0", "flex-1", "truncate", "select-none",
+	}.issubset(classes)
+
+
+def nativeActiveTaskSeconds(label):
+	"""Parse the app's active timer. A completed timer has no active duration."""
+	text = " ".join(str(label or "").casefold().split())
+	if not text.startswith(NATIVE_ACTIVE_TASK_TIMER_PREFIXES):
+		return None
+	match = NATIVE_TASK_TIMER_PATTERN.fullmatch(text)
+	if not match:
+		return None
+	duration = match.group(1)
+	if ":" in duration:
+		return sum(int(part) * 60 ** index for index, part in enumerate(reversed(duration.split(":"))))
+	seconds = 0
+	for count, unit in NATIVE_TASK_TIMER_UNIT_PATTERN.findall(duration):
+		if unit.startswith("h") or unit == "std":
+			seconds += int(count) * 3600
+		elif unit.startswith("m"):
+			seconds += int(count) * 60
+		else:
+			seconds += int(count)
+	return seconds
 
 
 def chatMessageShortcutIndex(keyName):
