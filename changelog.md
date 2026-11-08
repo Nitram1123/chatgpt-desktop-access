@@ -8,11 +8,15 @@ follows stable NVDA.
 
 - Added French translations for the add-on's settings, commands, and announcements.
   Regional French settings use the same translation.
+- Added NVDA+Shift+C to read the current chat title. NVDA also announces the
+  title when you switch to another chat.
 
 ### What to test
 
 - With NVDA set to French, open the add-on settings and pause and resume
   announcements. Check that the settings and the two announcements are in French.
+- Press NVDA+Shift+C inside a chat. Switch to another chat and check that NVDA
+  announces its title once. Repeat from the chat history dialog.
 
 ## 2026.2.19
 

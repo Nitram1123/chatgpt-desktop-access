@@ -1,13 +1,39 @@
 """Application-scoped commands for the ChatGPT desktop app."""
 
+from collections import deque
+
 import addonHandler
+import api
 import appModuleHandler
+import core
 import ui
+from controlTypes import Role
 from logHandler import log
 from scriptHandler import getLastScriptRepeatCount, script
 
 
 addonHandler.initTranslation()
+
+
+def _walkObjects(root, maxDepth):
+	if root is None:
+		return
+	objects = deque([(root, 0)])
+	while objects:
+		obj, depth = objects.popleft()
+		yield obj
+		if depth < maxDepth:
+			objects.extend((child, depth + 1) for child in obj.children)
+
+
+def _getMainDocument(window):
+	# Start at the outer window, so a browser pane cannot supply its own title.
+	return next((obj for obj in _walkObjects(window, 10) if obj.role == Role.DOCUMENT), None)
+
+
+def _chatTitle(window):
+	document = _getMainDocument(window)
+	return (document.name or "").strip() if document is not None else ""
 
 
 def _activeToolkitPlugin():
@@ -34,11 +60,58 @@ class AppModule(appModuleHandler.AppModule):
 		"kb:control+8": "readEighthMostRecentChatMessage",
 		"kb:control+9": "readNinthMostRecentChatMessage",
 		"kb:control+0": "readTenthMostRecentChatMessage",
+		"kb:NVDA+shift+c": "announceChatTitle",
 		"kb:NVDA+alt+v": "toggleVoiceMode",
 		"kb:NVDA+`": "toggleConversationMode",
 		"kb:NVDA+alt+w": "reportOrSwitchComposerMode",
 		"kb:NVDA+alt+a": "reportComposerAttachments",
 	}
+
+	def __init__(self, *args, **kwargs):
+		super().__init__(*args, **kwargs)
+		self._titleWatch = None
+		self._lastChatTitle = None
+		self._scheduleTitleWatch(0)
+
+	def event_appModule_gainFocus(self):
+		if self._titleWatch is None:
+			self._scheduleTitleWatch(0)
+
+	def event_appModule_loseFocus(self):
+		if self._titleWatch is not None:
+			self._titleWatch.Stop()
+			self._titleWatch = None
+		self._lastChatTitle = None
+
+	def terminate(self):
+		self.event_appModule_loseFocus()
+		super().terminate()
+
+	def _scheduleTitleWatch(self, delay):
+		def check():
+			if self._titleWatch is pending:
+				self._checkChatTitle()
+
+		pending = self._titleWatch = core.callLater(delay, check)
+
+	def _checkChatTitle(self):
+		self._titleWatch = None
+		window = api.getForegroundObject()
+		if window is None or window.processID != self.processID:
+			self._lastChatTitle = None
+			return
+		self._scheduleTitleWatch(500)
+		title = _chatTitle(window)
+		if not title:
+			return
+		current = window.windowHandle, title
+		previous, self._lastChatTitle = self._lastChatTitle, current
+		if previous is not None and previous[0] == current[0] and previous[1] != title:
+			plugin = _activeToolkitPlugin()
+			if plugin is not None:
+				plugin._announceChatOpened(title, window.windowHandle)
+			else:
+				ui.message(title)
 
 	def _runToolkitCommand(self, methodName, *args):
 		plugin = _activeToolkitPlugin()
@@ -51,6 +124,10 @@ class AppModule(appModuleHandler.AppModule):
 		except Exception:
 			log.error("ChatGPT Desktop Access command failed: %s", methodName, exc_info=True)
 			ui.message(_("That ChatGPT Desktop Access command could not be completed"))
+
+	@script(description=_("Announce the current chat title"))
+	def script_announceChatTitle(self, gesture):
+		ui.message(_chatTitle(api.getForegroundObject()) or _("The chat title is unavailable"))
 
 	@script(description=_("Read the most recent ChatGPT message"))
 	def script_readMostRecentChatMessage(self, gesture):

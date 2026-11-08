@@ -1708,3 +1708,9 @@ msgstr "Chats récents trouvés : {recent}. Chats archivés trouvés : {archived
 #: globalPlugins/codexStatusAnnouncer/messageListDialog.py:71
 msgid "{shown} of {total} cached messages shown; older messages remain in ChatGPT's conversation view"
 msgstr "{shown} messages en cache affichés sur {total}. Les plus anciens restent accessibles dans la conversation ChatGPT"
+
+msgid "Announce the current chat title"
+msgstr "Annoncer le titre du chat en cours"
+
+msgid "The chat title is unavailable"
+msgstr "Le titre du chat est indisponible"

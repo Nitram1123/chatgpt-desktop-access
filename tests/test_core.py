@@ -858,7 +858,8 @@ class StatusMessageTests(unittest.TestCase):
 			and any(isinstance(target, ast.Name) and target.id == "__gestures" for target in node.targets)
 		)
 		gestures = ast.literal_eval(gestureAssignment.value)
-		self.assertEqual(14, len(gestures))
+		self.assertEqual(15, len(gestures))
+		self.assertEqual("announceChatTitle", gestures["kb:NVDA+shift+c"])
 		self.assertEqual("toggleVoiceMode", gestures["kb:NVDA+alt+v"])
 		self.assertEqual("reportOrSwitchComposerMode", gestures["kb:NVDA+alt+w"])
 		self.assertEqual("reportComposerAttachments", gestures["kb:NVDA+alt+a"])
@@ -2851,7 +2852,9 @@ class StatusMessageTests(unittest.TestCase):
 		)
 		methods = [
 			node for node in pluginClass.body
-			if isinstance(node, ast.FunctionDef) and node.name in ("_setConversationMode", "_rememberBuffer")
+			if isinstance(node, ast.FunctionDef) and node.name in (
+				"_setConversationMode", "_rememberBuffer", "_announceChatOpened",
+			)
 		]
 		method = next(node for node in methods if node.name == "_rememberBuffer")
 		methodSource = ast.get_source_segment(PLUGIN_PATH.read_text(encoding="utf-8"), method)
@@ -2892,6 +2895,7 @@ class StatusMessageTests(unittest.TestCase):
 				self._chatHistoryDialog = None
 				self._pendingOpenedChatTitle = ""
 				self._pendingOpenedChatAt = 0.0
+				self._lastChatOpened = None
 				self._documentSwitchCount = 2
 				self._monitoringAnnounced = True
 				self._latestMessage = self._latestFullMessage = "Running command"
@@ -2909,6 +2913,8 @@ class StatusMessageTests(unittest.TestCase):
 			def _schedulePendingChatHistoryOpen(self, delay): return False
 			def _setConversationMode(self, mode, reason, authoritative=False):
 				return namespace["_setConversationMode"](self, mode, reason, authoritative)
+			def _announceChatOpened(self, title, windowHandle):
+				namespace["_announceChatOpened"](self, title, windowHandle)
 			def _resetTaskState(self, reason): self.resets.append(reason)
 			def _cancelChatHistoryExpansion(self): pass
 			def _speakOnce(self, message, *args, **kwargs): self.spoken.append(message)
@@ -2956,6 +2962,12 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertEqual(["document changed"], subject.resets)
 		self.assertEqual(["New chat opened"], subject.spoken)
 		self.assertEqual(3, subject._documentSwitchCount)
+		subject._announceChatOpened("Project discussion", 1234)
+		subject._announceChatOpened("Project discussion", 1234)
+		subject._announceChatOpened("Other chat", 1234)
+		self.assertEqual([
+			"New chat opened", "Chat opened: Project discussion", "Chat opened: Other chat",
+		], subject.spoken)
 		longBuffer = Buffer("Main landmark Do anything " + ("response body " * 900))
 		longSubject = Subject(refreshedBuffer)
 		namespace["_rememberBuffer"](longSubject, type("Object", (), {"treeInterceptor": longBuffer})())
