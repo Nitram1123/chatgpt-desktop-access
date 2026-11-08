@@ -1836,9 +1836,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			Role.CHECKBOX, Role.RADIOBUTTON,
 		}
 		invisible = getattr(State, "INVISIBLE", None)
+		promptIdentifier = None
+		if stopAtPrompt:
+			prompt = self._pendingPromptObject or self._lastPromptObject
+			if prompt is not None:
+				try:
+					promptIdentifier = self._buffer.getIdentifierFromNVDAObject(prompt)
+				except Exception:
+					# UIA and stale IA2 objects can lack a virtual-buffer identifier.
+					pass
 		return ChatMessageFieldCollector(
 			interactiveRoles, Role.EDITABLETEXT, isCodexPromptLabel,
 			((invisible,) if invisible is not None else ()), stopAtPrompt,
+			headingRole=Role.HEADING, focusableState=State.FOCUSABLE, promptIdentifier=promptIdentifier,
 		)
 
 	def _cacheRecentChatMessages(self, messages):

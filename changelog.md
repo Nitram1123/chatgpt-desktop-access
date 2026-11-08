@@ -8,11 +8,17 @@ follows stable NVDA.
 
 - Added French translations for the add-on's settings, commands, and announcements.
   Regional French settings use the same translation.
+- Fixed Control+1 through Control+0 for recent messages when ChatGPT uses a
+  different interface language. The add-on identifies user and assistant
+  messages from their accessibility headings.
 
 ### What to test
 
 - With NVDA set to French, open the add-on settings and pause and resume
   announcements. Check that the settings and the two announcements are in French.
+- Change ChatGPT's interface language and open a conversation with at least ten
+  messages. Press Control+1 for the newest message and Control+0 for the tenth
+  most recent. Check that the shortcuts read both user and assistant messages.
 
 ## 2026.2.19
 
