@@ -6,6 +6,9 @@ follows stable NVDA.
 
 ## Unreleased
 
+- Added an assignable NVDA command to archive the chat under focus or the
+  browse cursor in the sidebar. After archiving, focus moves to the next chat
+  in the list, or the previous chat if the archived chat was last.
 - Fixed Control+1 through Control+0 for recent messages when ChatGPT uses a
   different interface language. The add-on identifies user and assistant
   messages from their accessibility headings.
@@ -19,6 +22,10 @@ follows stable NVDA.
 
 ### What to test
 
+- Assign **Archive the focused sidebar chat and move to the next chat** in
+  NVDA's Input Gestures dialog. Try it on disposable chats in focus and browse
+  mode, including the last chat in the list. Check that only the selected chat
+  is archived and that focus stays in the sidebar. Repeat in English and French.
 - Change ChatGPT's interface language and open a conversation with at least ten
   messages. Press Control+1 for the newest message and Control+0 for the tenth
   most recent. Check that the shortcuts read both user and assistant messages.

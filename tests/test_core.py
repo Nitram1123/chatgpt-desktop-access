@@ -1929,6 +1929,7 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertTrue(chatActionMatches("pin", "Pin chat"))
 		self.assertTrue(chatActionMatches("pin", "Unpin chat"))
 		self.assertTrue(chatActionMatches("archive", "Archive chat"))
+		self.assertTrue(chatActionMatches("archive", "Archiver le chat"))
 		self.assertFalse(chatActionMatches("archive", "Archive project"))
 		self.assertFalse(chatActionMatches("pin", "Pin message"))
 
@@ -1981,10 +1982,10 @@ class StatusMessageTests(unittest.TestCase):
 			node for node in pluginTree.body
 			if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin"
 		)
-		method = next(
+		methods = [
 			node for node in pluginClass.body
-			if isinstance(node, ast.FunctionDef) and node.name == "_retryDirectChatAction"
-		)
+			if isinstance(node, ast.FunctionDef) and node.name in ("_retryDirectChatAction", "_invokeChatAction")
+		]
 
 		class ChatButton:
 			def __init__(self): self.focused = 0
@@ -2008,9 +2009,11 @@ class StatusMessageTests(unittest.TestCase):
 			})(),
 			"_": lambda text: text,
 		}
-		exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
+		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 
 		class Subject:
+			_invokeChatAction = namespace["_invokeChatAction"]
+
 			def __init__(self):
 				self._pendingDirectChatAction = ("Selected chat", "archive", "codex", 0)
 				self._chatActionRetryTimer = object()

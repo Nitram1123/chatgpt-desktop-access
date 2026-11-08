@@ -379,7 +379,7 @@ def chatActionMatches(action, label):
 	if action == "pin":
 		return label in ("pin chat", "unpin chat")
 	if action == "archive":
-		return label == "archive chat"
+		return label in ("archive chat", "archiver le chat")
 	return False
 
 
