@@ -138,6 +138,10 @@ msgstr ""
 msgid "Archived chats:"
 msgstr ""
 
+#: globalPlugins/codexStatusAnnouncer/core.py:254 globalPlugins/codexStatusAnnouncer/core.py:265
+msgid "Archived task {threadId}"
+msgstr ""
+
 #: globalPlugins/codexStatusAnnouncer/__init__.py:2654
 msgid "Attached: {files}"
 msgstr ""
@@ -1530,7 +1534,7 @@ msgstr ""
 msgid "{count} second"
 msgstr ""
 
-#: globalPlugins/codexStatusAnnouncer/core.py:527
+#: globalPlugins/codexStatusAnnouncer/core.py:2108 globalPlugins/codexStatusAnnouncer/core.py:2154 globalPlugins/codexStatusAnnouncer/core.py:527
 msgid "{count} seconds"
 msgstr ""
 

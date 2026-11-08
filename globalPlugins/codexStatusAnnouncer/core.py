@@ -211,7 +211,7 @@ def modeSpecificRecentChatTitles(mode, unifiedTitles, activeCodexTitles):
 	return tuple(result)
 
 
-def loadArchivedThreads(codexRoot, limit=200):
+def loadArchivedThreads(codexRoot, limit=200, translate=lambda text: text):
 	"""Read archived thread IDs and titles from Codex's JSONL metadata."""
 	if limit < 1:
 		return ()
@@ -251,18 +251,18 @@ def loadArchivedThreads(codexRoot, limit=200):
 					titles[threadId] = title
 	result = []
 	for threadId in threadIds:
-		title = titles.get(threadId, f"Archived task {threadId}")
+		title = titles.get(threadId) or translate("Archived task {threadId}").format(threadId=threadId)
 		result.append((threadId, title))
 	return tuple(result)
 
 
-def uniqueThreadLabels(entries):
+def uniqueThreadLabels(entries, translate=lambda text: text):
 	"""Give duplicate archived task titles distinct labels without losing their IDs."""
 	result = []
 	counts = {}
 	used = set()
 	for threadId, title in entries:
-		base = " ".join(str(title or "").split()) or f"Archived task {threadId}"
+		base = " ".join(str(title or "").split()) or translate("Archived task {threadId}").format(threadId=threadId)
 		count = counts.get(base, 0) + 1
 		label = base if count == 1 else f"{base} ({count})"
 		while label in used:
@@ -2105,7 +2105,7 @@ def standardFullMessage(label, translate=lambda text: text):
 		details.append(countMatch.group(0))
 	seconds = elapsedSeconds(text)
 	if seconds is not None and seconds >= 5:
-		details.append(f"{seconds} seconds")
+		details.append(translate("{count} seconds").format(count=seconds))
 	message = translate(minimal)
 	return f"{message}: {', '.join(details)}" if details else message
 
@@ -2151,7 +2151,7 @@ def minimalProfileMessage(label, translate=lambda text: text, profile="balanced"
 		details.append(countMatch.group(0))
 	seconds = elapsedSeconds(text)
 	if seconds is not None and seconds >= 10:
-		details.append(f"{seconds} seconds")
+		details.append(translate("{count} seconds").format(count=seconds))
 	return f"{message}: {', '.join(details)}" if details else message
 
 
