@@ -999,6 +999,23 @@ def responseCompletionTransition(previousMarker, initialized, currentMarker, bus
 	return currentMarker, True, completed
 
 
+SUBMITTED_TURN_END_MINIMUM_SECONDS = 4.0
+
+
+def submittedTurnFinishedUnseen(submittedAt, now, busy, stopControlVisible, activityLabel, draftText):
+	"""Recognize a short turn that ended before any scan saw its Stop button.
+
+	ChatGPT shows Stop within a second of a submission, but a quick turn can
+	remove it again in another second, before the first scan after typing. With
+	no Stop button and no activity some seconds after submitting, the turn is
+	over. A draft in the message field keeps the turn open, because ChatGPT
+	replaces Stop with Send or Steer while text is typed during a running turn.
+	"""
+	if not submittedAt or now - submittedAt < SUBMITTED_TURN_END_MINIMUM_SECONDS:
+		return False
+	return bool(busy and not stopControlVisible and not activityLabel and not str(draftText or "").strip())
+
+
 def shouldFinalizeResponseCompletion(pending, elapsedSeconds, settleSeconds, busy, stopControlVisible, activityLabel):
 	"""Finalize a tentative response only after a quiet, explicitly idle scan."""
 	normalizedLabel = " ".join(str(activityLabel or "").lower().split())

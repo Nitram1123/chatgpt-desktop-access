@@ -4,15 +4,21 @@ All notable changes to ChatGPT Desktop Access for NVDA, formerly Codex Access
 Toolkit and Codex Status Announcer, are recorded here. The active release line
 follows stable NVDA.
 
-## Unreleased
+## 2026.2.20
 
-- Added French translations for the add-on's settings, commands, and announcements.
-  Regional French settings use the same translation.
-
-### What to test
-
-- With NVDA set to French, open the add-on settings and pause and resume
-  announcements. Check that the settings and the two announcements are in French.
+- Added French translations for the add-on's settings, commands, and
+  announcements, contributed by Nitram1123 (pull request 5). Regional French
+  settings, such as French (Canada), use the same translation.
+- The Working sound stops after a short Codex or ChatGPT turn. ChatGPT
+  26.1027 no longer shows "Response complete", and a quick turn shows its Stop
+  button for only about a second, so the add-on often missed the end of the
+  turn and kept playing the Working sound until the window was closed. Now, if
+  a message was sent, at least four seconds have passed, and the add-on finds
+  no Stop button, no activity and an empty message field, it treats the turn
+  as finished. It still waits five seconds and checks again before saying so,
+  so activity that resumes keeps the sound going. Text typed during a running
+  turn, which ChatGPT shows as Send or Steer in place of Stop, keeps the turn
+  open.
 
 ## 2026.2.19
 

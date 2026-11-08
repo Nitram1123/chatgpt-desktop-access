@@ -82,6 +82,7 @@ responseCompletionTransition = core.responseCompletionTransition
 isResponseCompletionMarkerText = core.isResponseCompletionMarkerText
 responseCompletionScanMarker = core.responseCompletionScanMarker
 shouldFinalizeResponseCompletion = core.shouldFinalizeResponseCompletion
+submittedTurnFinishedUnseen = core.submittedTurnFinishedUnseen
 isTaskCompletionLabel = core.isTaskCompletionLabel
 intermediateCompletionCategory = core.intermediateCompletionCategory
 isKnownNonStatusButton = core.isKnownNonStatusButton
@@ -3199,9 +3200,12 @@ class StatusMessageTests(unittest.TestCase):
 			"isResponseCompletionMarkerText": isResponseCompletionMarkerText,
 			"responseCompletionScanMarker": responseCompletionScanMarker,
 			"responseCompletionTransition": responseCompletionTransition,
+			"submittedTurnFinishedUnseen": submittedTurnFinishedUnseen,
 		}
 		exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		class Subject:
+			_submittedTurnUnconfirmedAt = 0.0
+			_promptDraftText = ""
 			_conversationMode = "chatgpt"
 			_conversationModeObserved = False
 			_conversationModeChangedAt = 0.0
@@ -3315,6 +3319,42 @@ class StatusMessageTests(unittest.TestCase):
 			],
 			subject.limitNotices,
 		)
+		# A short turn can start and end between scans. Its log shows activity clear
+		# with no Stop button ever seen, and that must still end the working sound.
+		queued = []
+		subject._queueResponseCompletion = lambda: queued.append(Time.now)
+		class QuietInfo(Info):
+			def getTextWithFields(self):
+				return ("Recents",)
+		class ActivityInfo(Info):
+			def getTextWithFields(self):
+				return (Command("controlStart", Role.BUTTON, "Running command"), Command("controlEnd"))
+		class StopInfo(Info):
+			def getTextWithFields(self):
+				return (Command("controlStart", Role.BUTTON, "Stop"), Command("controlEnd"))
+		subject._busy = True
+		subject._stopControlVisible = False
+		subject._submittedTurnUnconfirmedAt = Time.now
+		Time.now += 3.9
+		namespace["_latestButtonStatus"](subject, QuietInfo())
+		self.assertEqual([], queued)
+		Time.now += 0.1
+		self.assertTrue(namespace["_latestButtonStatus"](subject, ActivityInfo()))
+		self.assertEqual([], queued)
+		subject._promptDraftText = "Steering text"
+		namespace["_latestButtonStatus"](subject, QuietInfo())
+		self.assertEqual([], queued)
+		subject._promptDraftText = ""
+		namespace["_latestButtonStatus"](subject, QuietInfo())
+		self.assertEqual([Time.now], queued)
+		self.assertEqual(0.0, subject._submittedTurnUnconfirmedAt)
+		namespace["_latestButtonStatus"](subject, QuietInfo())
+		self.assertEqual(1, len(queued))
+		# Once a Stop button was seen, only its disappearance ends the turn.
+		subject._submittedTurnUnconfirmedAt = Time.now - 10
+		namespace["_latestButtonStatus"](subject, StopInfo())
+		self.assertEqual(0.0, subject._submittedTurnUnconfirmedAt)
+		self.assertEqual(1, len(queued))
 
 	def test_exact_named_button_resolver_honors_the_scanned_ordinal(self):
 		pluginTree = ast.parse(PLUGIN_PATH.read_text(encoding="utf-8"))
@@ -5795,6 +5835,16 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertFalse(shouldFinalizeResponseCompletion(True, 30, 30, True, False, "Running command"))
 		self.assertFalse(shouldFinalizeResponseCompletion(True, 30, 30, False, False, ""))
 		self.assertFalse(shouldFinalizeResponseCompletion(True, 29.9, 30, True, False, ""))
+
+	def test_submitted_turn_ends_without_stop_button_or_activity(self):
+		self.assertTrue(submittedTurnFinishedUnseen(100.0, 104.0, True, False, "", ""))
+		self.assertTrue(submittedTurnFinishedUnseen(100.0, 200.0, True, False, "", "  "))
+		self.assertFalse(submittedTurnFinishedUnseen(100.0, 103.9, True, False, "", ""))
+		self.assertFalse(submittedTurnFinishedUnseen(0.0, 200.0, True, False, "", ""))
+		self.assertFalse(submittedTurnFinishedUnseen(100.0, 200.0, False, False, "", ""))
+		self.assertFalse(submittedTurnFinishedUnseen(100.0, 200.0, True, True, "", ""))
+		self.assertFalse(submittedTurnFinishedUnseen(100.0, 200.0, True, False, "Thinking", ""))
+		self.assertFalse(submittedTurnFinishedUnseen(100.0, 200.0, True, False, "", "Steering text"))
 
 	def test_trailing_intermediate_completion_preserves_response_completion_candidate(self):
 		self.assertEqual(("completion", "Reading finished"), statusDetails("Reading finished"))

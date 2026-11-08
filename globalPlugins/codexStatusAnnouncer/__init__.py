@@ -45,7 +45,7 @@ from .core import AnnouncementHistory, CATEGORY_SETTING, ChatMessageAccumulator,
 from .core import voiceControlKind
 from .core import attachmentPopupStructureSummary, isAttachmentButtonLikeLabel
 from .core import chatGPTAppVersionSummary, otherComposerMode, selectedComposerMode
-from .core import chatGPTCompatibilityFindings
+from .core import chatGPTCompatibilityFindings, submittedTurnFinishedUnseen
 from .core import (
 	SUGGESTION_MENU_CLOSE_KEYS, SUGGESTION_MENU_EDIT_KEYS, SUGGESTION_MENU_MOVE_KEYS,
 	SUGGESTION_MENU_TRIGGER_CHARACTERS, attachmentOptionKey, gestureKeyName, suggestionMenuReading,
@@ -67,18 +67,15 @@ from .soundOutput import (
 addonHandler.initTranslation()
 
 CONFIG_SECTION = "codexStatusAnnouncer"
-ADDON_VERSION = "2026.2.19"
+ADDON_VERSION = "2026.2.20"
 CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage"
 DEFAULT_SUPPORTED_APP_NAMES = "chatgpt,codex"
 APP_MODULE_ALIASES = (("codex", "chatgpt"),)
 CURRENT_RELEASE_NOTES = _(
-	"Version 2026.2.19\n\n"
+	"Version 2026.2.20\n\n"
 	"What's new:\n"
-	"• Typing / or @ in the message field now announces the suggestion menu: how many suggestions there are, and each one as you press Up or Down Arrow.\n"
-	"• After each ChatGPT update, the add-on checks that it can still find the controls it relies on, and says so once if something is missing.\n"
-	"• The Working sound no longer plays when ChatGPT is idle because a chat title in the sidebar or a menu reads like Codex progress.\n"
-	"• Naming a new Codex project no longer moves focus to the Change marker button while you type.\n"
-	"• NVDA+Alt+W reports whether the message field is set to Chat or Work; press it twice quickly to switch. NVDA+Alt+A says which files and tools are attached."
+	"• The Working sound now stops after a short Codex or ChatGPT turn, instead of playing until the ChatGPT window is closed.\n"
+	"• French translation of the add-on's settings, commands, and announcements, contributed by Nitram1123."
 )
 VERBOSITY_CHOICES = ("minimal", "full")
 FULL_SPEECH_PROFILE_CHOICES = ("standard", "developer", "raw")
@@ -1576,6 +1573,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._latestResponseMarker = None
 		self._responseMarkerInitialized = False
 		self._pendingResponseCompletionAt = 0.0
+		self._submittedTurnUnconfirmedAt = 0.0
 		self._chatHistoryDialog = None
 		self._pendingChatHistoryAction = None
 		self._chatHistoryActionTimer = None
@@ -1796,6 +1794,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._latestResponseMarker = None
 		self._responseMarkerInitialized = False
 		self._pendingResponseCompletionAt = 0.0
+		self._submittedTurnUnconfirmedAt = 0.0
 		self._usageLimitActive = False
 		self._lastUsageLimitNotice = ""
 		self._speechHistory.clear()
@@ -3854,6 +3853,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		"""Apply a terminal usage-limit state independently of its event source."""
 		self._pluginProgressOwnedBusy.clear()
 		self._pendingResponseCompletionAt = 0.0
+		self._submittedTurnUnconfirmedAt = 0.0
 		self._pendingUserMessageIncrease = False
 		self._stopControlVisible = False
 		self._promptHadText = False
@@ -5685,6 +5685,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def _beginPromptSubmission(self, reason):
 		draftText = self._promptDraftText
 		self._promptDraftText = ""
+		self._submittedTurnUnconfirmedAt = time.monotonic()
 		if draftText:
 			# Chromium can take several seconds to expose a newly posted message to
 			# its virtual buffer. Make the user's submitted turn reviewable immediately.
@@ -6018,6 +6019,16 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._stopControlVisible, stopped = stopControlTransition(self._stopControlVisible, stopControlVisible)
 		if stopped and self._busy and not latest:
 			self._setBusy(False, "stop control disappeared")
+		if stopControlVisible:
+			# A Stop button was seen, so its disappearance will end the turn.
+			self._submittedTurnUnconfirmedAt = 0.0
+		elif submittedTurnFinishedUnseen(
+			self._submittedTurnUnconfirmedAt, time.monotonic(), self._busy, stopControlVisible, latest,
+			self._promptDraftText,
+		):
+			self._submittedTurnUnconfirmedAt = 0.0
+			log.debug("ChatGPT Desktop Access found no Stop button after a submitted turn")
+			self._queueResponseCompletion()
 		latestResponseMarker = responseCompletionScanMarker(
 			responseCompleteMarkerCount, latestDetailedResponseMarker,
 		)
@@ -6258,6 +6269,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self._lastStateReason = reason
 			return
 		self._busy = busy
+		if not busy:
+			self._submittedTurnUnconfirmedAt = 0.0
 		self._lastStateReason = reason
 		if busy:
 			self._busyStartedAt = time.monotonic()
