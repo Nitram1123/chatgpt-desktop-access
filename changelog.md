@@ -6,6 +6,9 @@ follows stable NVDA.
 
 ## Unreleased
 
+- Added two assignable NVDA commands to move focus to the first project or
+  the first recent chat. The commands close Activity view when it is open,
+  show the sidebar if needed, and expand the requested section.
 - Fixed Control+1 through Control+0 for recent messages when ChatGPT uses a
   different interface language. The add-on identifies user and assistant
   messages from their accessibility headings.
@@ -19,6 +22,11 @@ follows stable NVDA.
 
 ### What to test
 
+- In ChatGPT, assign **Move to the first project in the sidebar** and
+  **Move to the first chat in Recents** under NVDA's Input Gestures. Try both
+  with Activity view open, the sidebar hidden, and the section collapsed.
+  Check that focus lands on the first item without opening it. Repeat with
+  the ChatGPT interface in English and French.
 - Change ChatGPT's interface language and open a conversation with at least ten
   messages. Press Control+1 for the newest message and Control+0 for the tenth
   most recent. Check that the shortcuts read both user and assistant messages.

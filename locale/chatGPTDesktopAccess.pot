@@ -110,7 +110,7 @@ msgstr ""
 msgid "Announce the \"/\" and \"@\" suggestion &menus in the message field"
 msgstr ""
 
-#: appModules/chatgpt.py:128
+#: appModules/chatgpt.py:367
 msgid "Announce the current chat title"
 msgstr ""
 
@@ -266,7 +266,7 @@ msgstr ""
 msgid "ChatGPT closed or changed; nothing was chosen"
 msgstr ""
 
-#: appModules/chatgpt.py:51 globalPlugins/codexStatusAnnouncer/__init__.py:1440 globalPlugins/codexStatusAnnouncer/__init__.py:504
+#: appModules/chatgpt.py:199 globalPlugins/codexStatusAnnouncer/__init__.py:1440 globalPlugins/codexStatusAnnouncer/__init__.py:504
 msgid "ChatGPT Desktop Access"
 msgstr ""
 
@@ -282,7 +282,7 @@ msgstr ""
 msgid "ChatGPT Desktop Access is not currently running"
 msgstr ""
 
-#: appModules/chatgpt.py:120
+#: appModules/chatgpt.py:359
 msgid "ChatGPT Desktop Access is not ready"
 msgstr ""
 
@@ -440,6 +440,14 @@ msgstr ""
 
 #: globalPlugins/codexStatusAnnouncer/__init__.py:6646
 msgid "Copy sanitized ChatGPT Desktop Access diagnostics"
+msgstr ""
+
+#: appModules/chatgpt.py:343
+msgid "Could not expand {section}"
+msgstr ""
+
+#: appModules/chatgpt.py:330 appModules/chatgpt.py:339
+msgid "Could not move focus in the sidebar"
 msgstr ""
 
 #: globalPlugins/codexStatusAnnouncer/__init__.py:6649 globalPlugins/codexStatusAnnouncer/__init__.py:6672
@@ -710,7 +718,15 @@ msgstr ""
 msgid "Move to ChatGPT or Codex before opening chat history"
 msgstr ""
 
-#: appModules/chatgpt.py:180
+#: appModules/chatgpt.py:375
+msgid "Move to the first chat in Recents"
+msgstr ""
+
+#: appModules/chatgpt.py:371
+msgid "Move to the first project in the sidebar"
+msgstr ""
+
+#: appModules/chatgpt.py:427
 msgid "Mute or unmute the ChatGPT microphone"
 msgstr ""
 
@@ -742,6 +758,10 @@ msgstr ""
 msgid "No archived {agent} chats"
 msgstr ""
 
+#: appModules/chatgpt.py:353
+msgid "No chats found in Recents"
+msgstr ""
+
 #: globalPlugins/codexStatusAnnouncer/__init__.py:6669
 msgid "No complete Codex progress message is available"
 msgstr ""
@@ -756,6 +776,10 @@ msgstr ""
 
 #: globalPlugins/codexStatusAnnouncer/__init__.py:2830
 msgid "No message field with Add files and more is shown here"
+msgstr ""
+
+#: appModules/chatgpt.py:352
+msgid "No projects found in the sidebar"
 msgstr ""
 
 #: globalPlugins/codexStatusAnnouncer/__init__.py:2120
@@ -798,7 +822,7 @@ msgstr ""
 msgid "Open a ChatGPT or Codex conversation before viewing messages"
 msgstr ""
 
-#: appModules/chatgpt.py:198
+#: appModules/chatgpt.py:445
 msgid "Open and focus the ChatGPT and Codex mode selector"
 msgstr ""
 
@@ -822,7 +846,7 @@ msgstr ""
 msgid "Open searchable and arrow-navigable ChatGPT or Codex chat history"
 msgstr ""
 
-#: appModules/chatgpt.py:172
+#: appModules/chatgpt.py:419
 msgid "Open the current conversation's messages in a native list"
 msgstr ""
 
@@ -954,23 +978,23 @@ msgstr ""
 msgid "Raw — exact exposed Codex progress text"
 msgstr ""
 
-#: appModules/chatgpt.py:160
+#: appModules/chatgpt.py:407
 msgid "Read the eighth-most-recent ChatGPT message"
 msgstr ""
 
-#: appModules/chatgpt.py:148
+#: appModules/chatgpt.py:395
 msgid "Read the fifth-most-recent ChatGPT message"
 msgstr ""
 
-#: appModules/chatgpt.py:144
+#: appModules/chatgpt.py:391
 msgid "Read the fourth-most-recent ChatGPT message"
 msgstr ""
 
-#: appModules/chatgpt.py:132
+#: appModules/chatgpt.py:379
 msgid "Read the most recent ChatGPT message"
 msgstr ""
 
-#: appModules/chatgpt.py:194
+#: appModules/chatgpt.py:441
 msgid "Read the native task timer"
 msgstr ""
 
@@ -978,7 +1002,7 @@ msgstr ""
 msgid "Read the next Codex announcement"
 msgstr ""
 
-#: appModules/chatgpt.py:164
+#: appModules/chatgpt.py:411
 msgid "Read the ninth-most-recent ChatGPT message"
 msgstr ""
 
@@ -986,23 +1010,23 @@ msgstr ""
 msgid "Read the previous Codex announcement"
 msgstr ""
 
-#: appModules/chatgpt.py:136
+#: appModules/chatgpt.py:383
 msgid "Read the second-most-recent ChatGPT message"
 msgstr ""
 
-#: appModules/chatgpt.py:156
+#: appModules/chatgpt.py:403
 msgid "Read the seventh-most-recent ChatGPT message"
 msgstr ""
 
-#: appModules/chatgpt.py:152
+#: appModules/chatgpt.py:399
 msgid "Read the sixth-most-recent ChatGPT message"
 msgstr ""
 
-#: appModules/chatgpt.py:168
+#: appModules/chatgpt.py:415
 msgid "Read the tenth-most-recent ChatGPT message"
 msgstr ""
 
-#: appModules/chatgpt.py:140
+#: appModules/chatgpt.py:387
 msgid "Read the third-most-recent ChatGPT message"
 msgstr ""
 
@@ -1042,11 +1066,11 @@ msgstr ""
 msgid "Report current Codex activity or repeat the latest message"
 msgstr ""
 
-#: appModules/chatgpt.py:190
+#: appModules/chatgpt.py:437
 msgid "Report the files and tools attached to the ChatGPT message"
 msgstr ""
 
-#: appModules/chatgpt.py:184
+#: appModules/chatgpt.py:431
 msgid "Report whether ChatGPT's message field is set to Chat or Work; press twice to switch"
 msgstr ""
 
@@ -1202,7 +1226,7 @@ msgstr ""
 msgid "Standard — action, target, counts, and useful timing"
 msgstr ""
 
-#: appModules/chatgpt.py:176
+#: appModules/chatgpt.py:423
 msgid "Start or end ChatGPT voice mode"
 msgstr ""
 
@@ -1254,7 +1278,7 @@ msgstr ""
 msgid "Text files (*.txt)|*.txt"
 msgstr ""
 
-#: appModules/chatgpt.py:126
+#: appModules/chatgpt.py:365
 msgid "That ChatGPT Desktop Access command could not be completed"
 msgstr ""
 
@@ -1266,7 +1290,7 @@ msgstr ""
 msgid "The Chat and Work switch is not shown here. It is above the message field in a new ChatGPT chat"
 msgstr ""
 
-#: appModules/chatgpt.py:130
+#: appModules/chatgpt.py:369
 msgid "The chat title is unavailable"
 msgstr ""
 
@@ -1312,6 +1336,10 @@ msgstr ""
 
 #: globalPlugins/codexStatusAnnouncer/__init__.py:4454
 msgid "The selected {agent} chat could not be opened"
+msgstr ""
+
+#: appModules/chatgpt.py:341
+msgid "The sidebar is unavailable"
 msgstr ""
 
 #: globalPlugins/codexStatusAnnouncer/__init__.py:101 globalPlugins/codexStatusAnnouncer/__init__.py:101 globalPlugins/codexStatusAnnouncer/__init__.py:2013 globalPlugins/codexStatusAnnouncer/__init__.py:660

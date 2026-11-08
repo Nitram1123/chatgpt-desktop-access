@@ -52,6 +52,7 @@ class ChatTitleTests(unittest.TestCase):
 		nodes = [
 			node for node in appTree.body if isinstance(node, (ast.FunctionDef, ast.ClassDef))
 			and node.name != "_activeToolkitPlugin"
+			and (not isinstance(node, ast.ClassDef) or node.name == "AppModule")
 		]
 		appNamespace = {
 			"_": translate,
