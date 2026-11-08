@@ -9,12 +9,16 @@ follows stable NVDA.
 - Fixed Control+1 through Control+0 for recent messages when ChatGPT uses a
   different interface language. The add-on identifies user and assistant
   messages from their accessibility headings.
+- Added NVDA+Shift+C to read the current chat title. NVDA also announces the
+  title when you switch to another chat.
 
 ### What to test
 
 - Change ChatGPT's interface language and open a conversation with at least ten
   messages. Press Control+1 for the newest message and Control+0 for the tenth
   most recent. Check that the shortcuts read both user and assistant messages.
+- Press NVDA+Shift+C inside a chat. Switch to another chat and check that NVDA
+  announces its title once. Repeat from the chat history dialog.
 
 ## 2026.2.20
 

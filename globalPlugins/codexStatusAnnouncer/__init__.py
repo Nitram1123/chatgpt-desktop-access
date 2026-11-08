@@ -1606,6 +1606,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._lastEmbeddedBrowserNoticeAt = 0.0
 		self._embeddedBrowserProgressBuckets = {}
 		self._pendingOpenedChatTitle = ""
+		self._lastChatOpened = None
 		self._pendingOpenedChatAt = 0.0
 		self._chatHistoryCaches = {"chatgpt": (), "codex": ()}
 		self._ambiguousRecentChatTitles = {"chatgpt": set(), "codex": set()}
@@ -4296,6 +4297,18 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._chatHistoryActionTimer = None
 		self._performChatHistoryAction(title, action, source, mode)
 
+	def _announceChatOpened(self, title, windowHandle):
+		# History and the document watcher can report the same chat switch.
+		message = _("Chat opened: {title}").format(title=title) if title else _("New chat opened")
+		self._latestMessage = self._latestFullMessage = message
+		now = time.monotonic()
+		key = windowHandle, " ".join(title.casefold().split())
+		previous = self._lastChatOpened
+		if title and previous is not None and previous[0] == key and now - previous[1] < 2.0:
+			return
+		self._lastChatOpened = key, now
+		self._speakOnce(message, "other", "other", brailleMessage=message)
+
 	def _rememberBuffer(self, obj, allowUnclassifiedConversation=False):
 		if not _isChatGPTObject(obj):
 			return False
@@ -4406,9 +4419,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				if conversationChanged:
 					self._documentSwitchCount += 1
 					self._resetTaskState("document changed")
-					message = _("Chat opened: {title}").format(title=title) if title else _("New chat opened")
-					self._latestMessage = self._latestFullMessage = message
-					self._speakOnce(message, "other", "other", brailleMessage=message)
+					self._announceChatOpened(title, candidateWindowHandle)
 					log.info("ChatGPT Desktop Access detected a newly opened chat document")
 				else:
 					log.debug("ChatGPT Desktop Access refreshed the Chromium virtual buffer without resetting task state")
