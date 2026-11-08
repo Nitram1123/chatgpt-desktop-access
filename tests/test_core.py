@@ -3896,6 +3896,63 @@ class StatusMessageTests(unittest.TestCase):
 			accumulator.messages(),
 		)
 
+	def test_recent_message_scan_reads_french_speakers_before_the_active_prompt(self):
+		class Field:
+			def __init__(self, role, name):
+				self.command = "controlStart"
+				self.field = {"role": role, "name": name}
+
+		for prompt in ("Travaillez avec Codex", "Travail avec ChatGPT", "Travailler avec ChatGPT", "Demander à ChatGPT"):
+			with self.subTest(prompt=prompt):
+				collector = ChatMessageFieldCollector({"edit"}, "edit", isCodexPromptLabel)
+				fields = (
+					Field("heading", "Vous avez dit :"), "Question actuelle",
+					"ChatGPT a dit\u00a0:", "Réponse actuelle",
+					Field("edit", prompt),
+					"ChatGPT a dit :", "Réponse d’une autre branche",
+				)
+				messages = chatMessagesFromTokens(token for field in fields for token in collector.feed(field))
+				self.assertTrue(collector.promptReached)
+				self.assertEqual((("user", "Question actuelle"), ("assistant", "Réponse actuelle")), messages)
+				self.assertFalse(looksLikeBlankCodexConversation(f"ChatGPT a dit : Réponse actuelle {prompt}"))
+
+	def test_recent_message_scan_uses_chromium_fields_with_unknown_labels(self):
+		class Field:
+			def __init__(self, command="controlStart", **values):
+				self.command = command
+				self.field = values
+
+		collector = ChatMessageFieldCollector(
+			{"edit"}, "edit", isCodexPromptLabel,
+			headingRole="heading", focusableState="focusable", promptIdentifier=(1, -2),
+		)
+		heading = {"role": "heading", "level": "4"}
+		messageHeading = {
+			**heading, "IAccessible2::attribute_class":
+				"sr-only m-0 select-none print:group-data-[print-formatting]/conversation-print:font-normal",
+		}
+		editor = {
+			"role": "edit", "IAccessible2::attribute_class": "ProseMirror",
+			"controlIdentifier_docHandle": "1", "name": "Escribe aquí",
+		}
+		end = Field("controlEnd")
+		self.assertEqual((), collector.feed(Field(
+			**heading, states={"focusable"}, **{"IAccessible2::attribute_class": "sr-only m-0 select-none"},
+		)))
+		collector.feed(end)
+		fields = (
+			Field(**messageHeading, states=set()), "Tú dijiste:", end, "Pregunta",
+			Field(**messageHeading, states={"focusable"}), "ChatGPT respondió:", end, "Respuesta",
+			Field(**editor, controlIdentifier_ID="-3"), "Borrador", end,
+		)
+		tokens = [token for field in fields for token in collector.feed(field)]
+		self.assertFalse(collector.promptReached)
+		tokens.extend(collector.feed(Field(**editor, controlIdentifier_ID="-2")))
+		self.assertTrue(collector.promptReached)
+		self.assertTrue(collector.done)
+		self.assertEqual((("user", "Pregunta"), ("assistant", "Respuesta")), chatMessagesFromTokens(tokens))
+
+
 	def test_recent_message_commands_expand_only_a_bounded_conversation_tail(self):
 		pluginTree = ast.parse(PLUGIN_PATH.read_text(encoding="utf-8"))
 		pluginClass = next(
@@ -3922,6 +3979,7 @@ class StatusMessageTests(unittest.TestCase):
 		class Roles:
 			BUTTON = "button"
 			EDITABLETEXT = "edit"
+			HEADING = "heading"
 			COMBOBOX = "combo"
 			LIST = "list"
 			TREEVIEW = "tree"
@@ -3967,7 +4025,7 @@ class StatusMessageTests(unittest.TestCase):
 			"api": type("Api", (), {"getFocusObject": staticmethod(lambda: focus)}),
 			"_isChatGPTObject": lambda obj: True,
 			"Role": Roles,
-			"State": type("State", (), {"INVISIBLE": "invisible"}),
+			"State": type("State", (), {"INVISIBLE": "invisible", "FOCUSABLE": "focusable"}),
 			"textInfos": type("TextInfos", (), {
 				"POSITION_LAST": positionLast, "UNIT_CHARACTER": object(),
 			}),

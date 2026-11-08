@@ -4,6 +4,18 @@ All notable changes to ChatGPT Desktop Access for NVDA, formerly Codex Access
 Toolkit and Codex Status Announcer, are recorded here. The active release line
 follows stable NVDA.
 
+## Unreleased
+
+- Fixed Control+1 through Control+0 for recent messages when ChatGPT uses a
+  different interface language. The add-on identifies user and assistant
+  messages from their accessibility headings.
+
+### What to test
+
+- Change ChatGPT's interface language and open a conversation with at least ten
+  messages. Press Control+1 for the newest message and Control+0 for the tenth
+  most recent. Check that the shortcuts read both user and assistant messages.
+
 ## 2026.2.20
 
 - Added French translations for the add-on's settings, commands, and

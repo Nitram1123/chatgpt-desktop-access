@@ -18,9 +18,19 @@ from pathlib import Path
 CHATGPT_PROMPT_LABELS = (
 	"do anything", "ask anything", "message codex", "message chatgpt", "send a message",
 	"work with codex", "work with chatgpt", "ask chatgpt",
+	"travaillez avec codex", "travailler avec chatgpt", "travail avec chatgpt", "demander à chatgpt",
 )
+CHAT_MESSAGE_SPEAKER_LABELS = {
+	"you said": "user",
+	"chatgpt said": "assistant",
+	"vous avez dit": "user",
+	"chatgpt a dit": "assistant",
+}
 # Web class of the message field's editor, whatever its label says.
 CHATGPT_PROMPT_EDITOR_CLASS = "ProseMirror"
+CHAT_MESSAGE_HEADING_CLASSES = frozenset({
+	"sr-only", "print:group-data-[print-formatting]/conversation-print:font-normal",
+})
 # The button that opens the attachment and tools menu.
 ADD_FILES_BUTTON_NAME = "Add files and more"
 # Older Codex views offer this separate attachment control.
@@ -589,9 +599,26 @@ def looksLikeBlankCodexConversation(text):
 	return not (
 		re.search(r"\buser message\s+\d+\b", text)
 		or "response complete:" in text
-		or "chatgpt said:" in text
-		or "you said:" in text
+		or any(f"{label}:" in text or f"{label} :" in text for label in CHAT_MESSAGE_SPEAKER_LABELS)
 	)
+
+
+def chatMessageSpeaker(label):
+	"""Identify a speaker heading with or without whitespace before its colon."""
+	text = " ".join(str(label or "").casefold().split())
+	return CHAT_MESSAGE_SPEAKER_LABELS.get(text[:-1].rstrip(), "") if text.endswith(":") else ""
+
+
+def chatMessageHeadingSpeaker(field, headingRole, focusableState):
+	"""Identify Chromium's conversation headings using its accessible metadata."""
+	if (
+		headingRole is None or field.get("role") != headingRole or focusableState is None
+		or "states" not in field or str(field.get("level")) != "4"
+		or not CHAT_MESSAGE_HEADING_CLASSES.issubset(str(field.get(ATTACHMENT_POPUP_CLASS_KEY, "")).split())
+	):
+		return ""
+	# The app uses tabindex=-1 only on assistant headings.
+	return "assistant" if focusableState in (field.get("states") or ()) else "user"
 
 
 def chatMessageShortcutIndex(keyName):
@@ -666,7 +693,7 @@ class ChatMessageAccumulator:
 				self._finish()
 			self._currentSpeaker = value
 		elif kind == "text" and self._currentSpeaker and value:
-			if value.casefold().startswith("response complete:"):
+			if isResponseCompletionMarkerText(value) or chatMessageSpeaker(value):
 				return
 			if isChatMessageTrailingUiText(value):
 				if self._parts or self._interfaceCandidate is not None:
@@ -678,7 +705,7 @@ class ChatMessageAccumulator:
 					self._currentSpeaker = ""
 				else:
 					self._interfaceCandidate = rawValue
-			elif value.casefold() not in ("you said:", "chatgpt said:", "response complete"):
+			else:
 				self._interfaceCandidate = None
 				self._parts.append(rawValue)
 		elif kind == "end":
@@ -695,12 +722,16 @@ class ChatMessageFieldCollector:
 
 	def __init__(
 		self, interactiveRoles, editableRole, promptLabelPredicate, invisibleStates=(), stopAtPrompt=True,
+		*, headingRole=None, focusableState=None, promptIdentifier=None,
 	):
 		self._interactiveRoles = frozenset(interactiveRoles or ())
 		self._editableRole = editableRole
 		self._promptLabelPredicate = promptLabelPredicate
 		self._invisibleStates = frozenset(invisibleStates or ())
 		self._stopAtPrompt = bool(stopAtPrompt)
+		self._headingRole = headingRole
+		self._focusableState = focusableState
+		self._promptIdentifier = tuple(map(str, promptIdentifier)) if promptIdentifier else None
 		self._ignoredDepth = 0
 		self.promptReached = False
 		self.done = False
@@ -711,12 +742,10 @@ class ChatMessageFieldCollector:
 		if isinstance(item, str):
 			if self._ignoredDepth:
 				return ()
-			marker = " ".join(item.split()).casefold()
-			if marker == "you said:":
-				return (("speaker", "user"),)
-			if marker == "chatgpt said:":
-				return (("speaker", "assistant"),)
-			if marker != "response complete":
+			speaker = chatMessageSpeaker(item)
+			if speaker:
+				return (("speaker", speaker),)
+			if not isResponseCompletionMarkerText(item):
 				return (("text", item),)
 			return ()
 		command = getattr(item, "command", "")
@@ -735,25 +764,31 @@ class ChatMessageFieldCollector:
 			if hidden:
 				self._ignoredDepth = 1
 				return ()
+			headingSpeaker = chatMessageHeadingSpeaker(field, self._headingRole, self._focusableState)
+			if headingSpeaker:
+				# Skip the localized heading text so it cannot become part of the message.
+				self._ignoredDepth = 1
+				return (("speaker", headingSpeaker),)
 			name = " ".join(str(field.get("name", "") or "").split())
 			promptLabels = (
 				name,
 				" ".join(str(field.get("placeholder", "") or "").split()),
 				" ".join(str(field.get("description", "") or "").split()),
 			)
-			if role == self._editableRole and any(
-				self._promptLabelPredicate(label) for label in promptLabels if label
+			if role == self._editableRole and (
+				(self._promptIdentifier is not None and self._promptIdentifier == (
+					str(field.get("controlIdentifier_docHandle")), str(field.get("controlIdentifier_ID")),
+				))
+				or any(self._promptLabelPredicate(label) for label in promptLabels if label)
 			):
 				self.promptReached = True
 				if self._stopAtPrompt:
 					self.done = True
 				return (("end", ""),)
 			tokens = []
-			marker = name.casefold()
-			if marker == "you said:":
-				tokens.append(("speaker", "user"))
-			elif marker == "chatgpt said:":
-				tokens.append(("speaker", "assistant"))
+			speaker = chatMessageSpeaker(name)
+			if speaker:
+				tokens.append(("speaker", speaker))
 			if role in self._interactiveRoles:
 				self._ignoredDepth = 1
 				if role == self._editableRole:
@@ -1124,7 +1159,8 @@ def isChatHistoryConversationBoundary(label):
 	text = " ".join(str(label or "").casefold().split())
 	return bool(
 		userMessageNumber(text) is not None
-		or text in ("you said:", "chatgpt said:", "dismiss usage alert", "usage consumed")
+		or chatMessageSpeaker(text)
+		or text in ("dismiss usage alert", "usage consumed")
 		or re.fullmatch(r"\d{1,3}% usage remaining", text)
 		or text.startswith(("resets every ", "next reset "))
 	)
