@@ -8,11 +8,21 @@ follows stable NVDA.
 
 - Added French translations for the add-on's settings, commands, and announcements.
   Regional French settings use the same translation.
+- Recurring progress feedback follows ChatGPT's native task timer. A new
+  assignable command, **Read the native task timer**, reports the displayed
+  duration or the current thinking state.
+- Outside ChatGPT, progress updates are sound-only and stop if the native timer
+  stops updating. Tasks without an exposed timer do not produce recurring cues.
 
 ### What to test
 
 - With NVDA set to French, open the add-on settings and pause and resume
   announcements. Check that the settings and the two announcements are in French.
+- Assign **Read the native task timer** in NVDA's Input Gestures dialog. Start a
+  Codex task and compare the spoken duration with the timer in the conversation.
+- Switch to another chat or another app while the task is running. Check that
+  the previous chat's progress stops and that any progress heard outside
+  ChatGPT comes from new timer updates.
 
 ## 2026.2.19
 

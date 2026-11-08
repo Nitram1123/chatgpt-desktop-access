@@ -114,6 +114,10 @@ class AppModule(appModuleHandler.AppModule):
 	def script_reportComposerAttachments(self, gesture):
 		self._runToolkitCommand("_reportComposerAttachments")
 
+	@script(description=_("Read the native task timer"))
+	def script_reportNativeTaskTimer(self, gesture):
+		self._runToolkitCommand("_reportNativeTaskTimer")
+
 	@script(description=_("Open and focus the ChatGPT and Codex mode selector"))
 	def script_toggleConversationMode(self, gesture):
 		"""Open ChatGPT's native selector for manual Arrow-key selection."""

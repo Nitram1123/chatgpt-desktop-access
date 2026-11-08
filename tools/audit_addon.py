@@ -108,7 +108,7 @@ def audit(projectRoot, packagePath, version):
 	assert "for candidate in (root, obj):" in plugin, "popup handles can override the conversation window"
 	assert "if not self._conversationWindowIsAvailable(candidateWindowHandle):" in plugin, "closed buffers can reattach"
 	assert "pollTimer = self._timer" in plugin, "poll callbacks do not retain their owning timer"
-	assert "if self._timer is pollTimer:" in plugin, "poll callbacks can overwrite an earlier scheduled timer"
+	assert "if self._timer is pollTimer and pollTimer is not None:" in plugin, "poll callbacks can overwrite an earlier scheduled timer"
 	assert "def _fallbackExternalWindowHandle(self, excludedProcessId):" in plugin, "closed-window fallback focus is missing"
 	assert "winUser.GW_HWNDNEXT" in plugin, "fallback focus does not inspect remaining app windows"
 	assert "processId != excludedProcessId" in plugin, "fallback focus can reactivate the closed ChatGPT process"

@@ -454,7 +454,8 @@ class StatusMessageTests(unittest.TestCase):
 			"locale/fr/LC_MESSAGES/nvda.mo", "locale/fr/manifest.ini",
 		):
 			self.assertIn(required, paths)
-		self.assertEqual(67, len(paths))
+		self.assertIn("globalPlugins/codexStatusAnnouncer/bufferUpdates.py", paths)
+		self.assertEqual(68, len(paths))
 		self.assertIn("globalPlugins/codexStatusAnnouncer/attachmentDiagnostics.py", paths)
 		self.assertIn("globalPlugins/codexStatusAnnouncer/attachmentMenuDialog.py", paths)
 		self.assertEqual(51, sum(path.endswith(".wav") for path in paths))
@@ -468,6 +469,8 @@ class StatusMessageTests(unittest.TestCase):
 	def test_french_catalog_translates_generated_labels_and_durations(self):
 		translate = gettext.translation("nvda", PROJECT_ROOT / "locale", languages=["fr_CA"]).gettext
 		self.assertEqual("Archiver le chat", translate("Archive chat"))
+		self.assertEqual("Lire le compteur natif de la tâche", translate("Read the native task timer"))
+		self.assertEqual("Aucun compteur de tâche actif", translate("No active task timer"))
 		self.assertEqual((("123", "Tâche archivée 123"),), uniqueThreadLabels((("123", ""),), translate))
 		label = "Running command: git for 12 seconds"
 		self.assertIn("12 secondes", core.standardFullMessage(label, translate))
@@ -886,6 +889,7 @@ class StatusMessageTests(unittest.TestCase):
 		}
 		appNames = {node.name for node in appClass.body if isinstance(node, ast.FunctionDef)}
 		self.assertIn("script_toggleConversationMode", appNames)
+		self.assertIn("script_reportNativeTaskTimer", appNames)
 		self.assertIn('_("Open and focus the ChatGPT and Codex mode selector")', appModule)
 		self.assertIn('_runToolkitCommand("_openConversationModeSelector")', appModule)
 		self.assertTrue(browserScripts.isdisjoint(appNames))
@@ -1127,7 +1131,6 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertIn('redactSensitive(message) if conf["redactSensitive"] else message', plugin)
 		self.assertIn("or not _isChatGPTObject(obj):", plugin)
 		self.assertIn("previousValues = {", plugin)
-		self.assertIn("backgroundActivityName(self._activeCategory, self._latestFullMessage)", plugin)
 		self.assertIn("self._schedulePopupDialogFocus(obj)", plugin)
 		self.assertIn("self._focusPopupDialog", plugin)
 		self.assertIn("if not _isChatGPTObject(obj):", plugin)
@@ -2910,6 +2913,7 @@ class StatusMessageTests(unittest.TestCase):
 			def _setConversationMode(self, mode, reason, authoritative=False):
 				return namespace["_setConversationMode"](self, mode, reason, authoritative)
 			def _resetTaskState(self, reason): self.resets.append(reason)
+			def _bindNativeTaskTimer(self, buffer): pass
 			def _cancelChatHistoryExpansion(self): pass
 			def _speakOnce(self, message, *args, **kwargs): self.spoken.append(message)
 		namespace = {
@@ -3855,6 +3859,206 @@ class StatusMessageTests(unittest.TestCase):
 			(("user", "current question"), ("assistant", "current answer")),
 			accumulator.messages(),
 		)
+
+	def test_native_task_timer_parses_active_localized_durations(self):
+		for label, expected in (
+			("En cours depuis 3min 26s", 206), ("Working for 0s", 0),
+			("In Bearbeitung seit 1 Std. 2 Minuten 3 Sekunden", 3723),
+			("Processando há 1:05", 65), ("En cours depuis 1:02:03", 3723),
+			("A travaillé pendant 10s", None), ("Worked for 2min", None),
+			("Running a command for 15s", None), ("Working for 3s on this", None),
+		):
+			with self.subTest(label=label):
+				self.assertEqual(expected, core.nativeActiveTaskSeconds(label))
+
+	def test_native_timer_feedback_uses_only_virtual_buffer_updates(self):
+		observerPath = PLUGIN_PATH.with_name("bufferUpdates.py")
+		observerClass = next(node for node in ast.parse(observerPath.read_text(encoding="utf-8")).body if isinstance(node, ast.ClassDef))
+		pluginTree = ast.parse(PLUGIN_PATH.read_text(encoding="utf-8"))
+		pluginClass = next(node for node in pluginTree.body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
+		names = {"_observeNativeTaskTimer", "_clearNativeTaskTimer", "_bindNativeTaskTimer"}
+		methods = [node for node in pluginClass.body if isinstance(node, ast.FunctionDef) and node.name in names]
+		class Timer:
+			def __init__(self, delay, callback):
+				self.delay = delay
+				self.callback = callback
+				self.stopped = False
+				timers.append(self)
+			def Stop(self):
+				self.stopped = True
+
+		class Buffer:
+			def __init__(self, title):
+				self.rootNVDAObject = type("Document", (), {"name": title})()
+				self.label = ""
+				self.turn = (1, -2)
+			def _handleUpdate(self, label):
+				self.label = label
+				return "NVDA updated"
+
+		timers, pulses, sounds, discarded = [], [], [], []
+		clock = type("Clock", (), {"now": 1.0})()
+		clock.monotonic = lambda: clock.now
+		conf = {
+			"maximumBusyMinutes": 60, "outputWorking": "all", "speech": True, "braille": True,
+			"soundWhenSpeechUnavailable": True, "progressSoundStyle": "clicks", "clickVolume": "normal",
+			"announceWorking": True, "announceHeartbeat": True, "workingIntervalSeconds": 5, "continuousWorkingClicks": True,
+			"workingClickStartDelayMs": 500, "workingClickIntervalMs": 1400,
+		}
+		namespace = {
+			"time": clock, "wx": type("Wx", (), {"CallLater": Timer}), "_settings": lambda: conf,
+			"_": lambda text: text, "CATEGORY_OUTPUT_CONFIG": {"working": "outputWorking"},
+			"_discardPendingActivitySounds": lambda: discarded.append(True),
+			"_playProgressSound": lambda *args: sounds.append(args[0]) or True,
+			"nativeActiveTaskSeconds": core.nativeActiveTaskSeconds,
+			"categoryOutputActions": core.categoryOutputActions,
+			"shouldPlayContinuousWorkingClick": core.shouldPlayContinuousWorkingClick,
+		}
+		exec(compile(ast.Module(body=[observerClass, *methods], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
+		class Subject:
+			_buffer = Buffer("First chat")
+			_nativeTimerSeconds = None
+			_conversationWindowHandle = 123
+			_brailleCompositionActive = _paused = False
+			_appFocusState = True
+			_ownsForeground = False
+			# Legacy stop, progress, and completion state cannot gate native feedback.
+			_busy = _stopControlVisible = False
+			_pendingResponseCompletionAt = 42.0
+			def _conversationWindowIsAvailable(self, handle): return True
+			def _conversationWindowOwnsForeground(self, handle): return self._ownsForeground
+			def _attachmentMenuFlowActive(self): return False
+			def _readNativeTaskTimer(self): return self._buffer.label, self._buffer.turn
+			def _announceBackgroundPulse(self, elapsed, conf, actions): pulses.append((elapsed, actions))
+
+		for name in names:
+			setattr(Subject, name, namespace[name])
+		subject = Subject()
+		subject._nativeTimerObserver = namespace["BufferUpdateObserver"](subject._observeNativeTaskTimer)
+		buffer = subject._buffer
+		subject._bindNativeTaskTimer(buffer)
+		self.assertEqual([], timers)
+
+		def update(label):
+			self.assertEqual("NVDA updated", buffer._handleUpdate(label))
+			clock.now += timers[-1].delay / 1000
+			timers[-1].callback()
+
+		self.assertEqual("NVDA updated", buffer._handleUpdate("En cours depuis 5s"))
+		update("En cours depuis 6s")
+		self.assertEqual(1, len(timers))
+		self.assertEqual(6, subject._nativeTimerSeconds)
+		update("En cours depuis 7s")
+		update("En cours depuis 7s")
+		self.assertEqual(["working"], sounds)
+		clock.now += 20
+		self.assertEqual([], pulses)
+		self.assertEqual(7, subject._nativeTimerSeconds)
+		self.assertEqual(["working"], sounds)
+		update("En cours depuis 12s")
+		backgroundPulse = (12, {"speech": False, "braille": False, "sound": True})
+		self.assertEqual([backgroundPulse], pulses)
+		update("A travaillé pendant 12s")
+		self.assertIsNone(subject._nativeTimerSeconds)
+		self.assertEqual([True], discarded)
+		update("En cours depuis 13s")
+		buffer.rootNVDAObject.name = "Second chat"
+		update("Working for 50s")
+		self.assertEqual([backgroundPulse], pulses)
+		self.assertEqual(["working", "working"], sounds)
+		self.assertEqual(50, subject._nativeTimerSeconds)
+		buffer.turn = (1, -3)
+		update("Working for 56s")
+		self.assertEqual([backgroundPulse], pulses)
+		self.assertEqual(["working", "working"], sounds)
+		subject._ownsForeground = True
+		update("Working for 62s")
+		foregroundPulse = (62, {"speech": True, "braille": True, "sound": True})
+		self.assertEqual([backgroundPulse, foregroundPulse], pulses)
+		buffer._handleUpdate("Working for 68s")
+		pending = timers[-1]
+		subject._bindNativeTaskTimer(None)
+		self.assertTrue(pending.stopped)
+		pending.callback()
+		self.assertIsNone(subject._nativeTimerSeconds)
+		self.assertNotIn("_handleUpdate", vars(buffer))
+		self.assertEqual([backgroundPulse, foregroundPulse], pulses)
+
+	def test_native_timer_prefers_the_live_object_in_the_latest_turn(self):
+		tree = ast.parse(PLUGIN_PATH.read_text(encoding="utf-8"))
+		pluginClass = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
+		methods = [node for node in pluginClass.body if isinstance(node, ast.FunctionDef) and node.name in (
+			"_readNativeTaskTimer", "_reportNativeTaskTimer",
+		)]
+		spoken = []
+		namespace = {
+			"textInfos": type("TextInfos", (), {"POSITION_LAST": "last"}),
+			"api": type("Api", (), {"getFocusObject": lambda: None}),
+			"ui": type("Ui", (), {"message": spoken.append}),
+			"_": lambda text: text,
+			"_extendScanStart": lambda info, count: None,
+			"_domClassNames": lambda obj: getattr(obj, "classes", ""),
+			"RECENT_CHAT_INITIAL_SCAN_CHARACTERS": 32768,
+			"NATIVE_TASK_TIMER_PREFIXES": core.NATIVE_TASK_TIMER_PREFIXES,
+			"nativeActiveTaskSeconds": core.nativeActiveTaskSeconds,
+			"ATTACHMENT_POPUP_CLASS_KEY": core.ATTACHMENT_POPUP_CLASS_KEY,
+			"chatMessageSpeaker": core.chatMessageSpeaker,
+			"chatMessageHeadingSpeaker": core.chatMessageHeadingSpeaker,
+			"isNativeThinkingControl": core.isNativeThinkingControl,
+			"isNativeThinkingLabel": core.isNativeThinkingLabel,
+			"isResponseCompletionMarkerText": core.isResponseCompletionMarkerText,
+			"nativeTaskTimer": core.nativeTaskTimer,
+			"Role": type("Role", (), {"HEADING": "heading"}),
+			"State": type("State", (), {"FOCUSABLE": "focusable"}),
+		}
+		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
+		field = type("Field", (), {
+			"command": "formatChange", "field": {"ia2TextWindowHandle": 1, "ia2TextUniqueID": -2},
+		})()
+		items = ["A travaillé pendant 30 s", "Vous avez dit :", "En cours depuis ", field, "12 s"]
+
+		class Buffer:
+			def makeTextInfo(self, position): return self
+			def collapse(self): pass
+			def getTextWithFields(self): return items
+			def getNVDAObjectFromIdentifier(self, handle, identifier):
+				if identifier == -3:
+					return type("Thinking", (), {"classes": "min-w-0 flex-1 truncate select-none"})()
+				return type("Timer", (), {"name": "En cours depuis 14 s"})()
+
+		class Subject:
+			_buffer = Buffer()
+			_readNativeTaskTimer = namespace["_readNativeTaskTimer"]
+			_reportNativeTaskTimer = namespace["_reportNativeTaskTimer"]
+			def _findChatGPTPromptObject(self): return None
+			def _rememberBuffer(self, focus, allowUnclassifiedConversation=False): pass
+
+		subject = Subject()
+		self.assertEqual(("En cours depuis 14 s", None), subject._readNativeTaskTimer())
+		items[3:] = ["sans durée", "12 s"]
+		self.assertEqual(("", None), subject._readNativeTaskTimer())
+		thinkingControl = type("Field", (), {
+			"command": "controlStart", "field": {core.ATTACHMENT_POPUP_CLASS_KEY: "cadencedShimmer-uMTG1d"},
+		})()
+		end = type("Field", (), {"command": "controlEnd"})()
+		items[2:] = ["En cours de réflexion"]
+		subject._reportNativeTaskTimer()
+		items[2:] = [thinkingControl, "En cours de réflexion…", end]
+		self.assertEqual(("", None), subject._readNativeTaskTimer())
+		subject._reportNativeTaskTimer()
+		items.extend(["En cours depuis ", field, "12 s"])
+		subject._reportNativeTaskTimer()
+		items[5:] = ["Worked for 14 s"]
+		subject._reportNativeTaskTimer()
+		self.assertEqual([
+			"No active task timer", "Thinking", "En cours depuis 14 s", "No active task timer",
+		], spoken)
+		namespace["_"] = lambda text: text
+		items[2:] = [type("Field", (), {
+			"command": "formatChange", "field": {"ia2TextWindowHandle": 1, "ia2TextUniqueID": -3},
+		})(), "Thinking"]
+		subject._reportNativeTaskTimer()
+		self.assertEqual("Thinking", spoken[-1])
 
 	def test_recent_message_commands_expand_only_a_bounded_conversation_tail(self):
 		pluginTree = ast.parse(PLUGIN_PATH.read_text(encoding="utf-8"))
@@ -4988,7 +5192,6 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertIn("self._detachConversationIfWindowClosed(now)", plugin)
 		self.assertIn("if self._conversationWindowHandle:\n\t\t\t\tconversationDetached", plugin)
 		self.assertIn("winUser.isWindowVisible(handle)", plugin)
-		self.assertEqual(2, plugin.count("if self._pendingResponseCompletionAt:\n\t\t\treturn"))
 		self.assertIn("self._schedulePromptInspection(obj)", plugin)
 		self.assertIn("self._promptInspectionTimer.Stop()", plugin)
 		self.assertIn("inputCore.decide_executeGesture.register(self._observeInputGesture)", plugin)
@@ -5061,16 +5264,12 @@ class StatusMessageTests(unittest.TestCase):
 				self._buffer = None
 				self._conversationWindowHandle = 0
 				self._busy = False
-				self._busyStartedAt = 0.0
 				self._pendingResponseCompletionAt = 0.0
 				self._lastScannedLabel = ""
 				self._active = False
-				self.workingClicks = 0
 			def _rememberBuffer(self, obj):
 				self._schedulePoll(300, requestInspection=True)
 			def _setBusy(self, busy, reason): pass
-			def _announceBackgroundPulse(self): pass
-			def _announceContinuousWorkingClick(self): self.workingClicks += 1
 		namespace = {
 			"wx": Wx, "time": Clock,
 			"api": type("Api", (), {"getFocusObject": staticmethod(lambda: object())}),
@@ -5093,7 +5292,6 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertEqual(1, len(created))
 		self.assertIs(created[0], subject._timer)
 		self.assertEqual(300, created[0].delay)
-		self.assertEqual(1, subject.workingClicks)
 		created.clear()
 		periodicSubject = Subject()
 		periodicSubject._rememberBuffer = lambda obj: None
@@ -5101,7 +5299,6 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertEqual(1, len(created))
 		self.assertIs(created[0], periodicSubject._timer)
 		self.assertEqual(500, created[0].delay)
-		self.assertEqual(1, periodicSubject.workingClicks)
 		created.clear()
 		earlyCloseSubject = Subject()
 		earlyCloseSubject._conversationWindowHandle = 1234
@@ -6174,6 +6371,7 @@ class StatusMessageTests(unittest.TestCase):
 		)
 		namespace = {
 			"statusDetails": core.statusDetails,
+			"nativeTaskTimer": core.nativeTaskTimer,
 			"shouldSuppressTrailingCompletion": core.shouldSuppressTrailingCompletion,
 			"log": type("Log", (), {"debug": lambda *args: None})(),
 		}
@@ -6417,41 +6615,6 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertEqual(-7232, namespace["_extendScanStart"](info, 32768))
 		self.assertEqual((0, 40000), (info.start, info.end))
 
-	def test_pending_response_completion_suppresses_even_forced_working_ticks(self):
-		pluginTree = ast.parse(PLUGIN_PATH.read_text(encoding="utf-8"))
-		pluginClass = next(node for node in pluginTree.body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
-		for name in ("_retryDirectChatAction", "_focusUnarchiveButton"):
-			method = next(node for node in pluginClass.body if isinstance(node, ast.FunctionDef) and node.name == name)
-			namespace = {}
-			exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
-			subject = type("Subject", (), {
-				"_pendingDirectChatAction": ("title", "archive", "codex", 0),
-				"_conversationWindowHandle": 123,
-				"_conversationWindowOwnsForeground": lambda self, handle: False,
-			})()
-			namespace[name](subject)
-			if name == "_retryDirectChatAction": self.assertIsNone(subject._pendingDirectChatAction)
-			else: self.assertEqual(0, subject._unarchiveFocusAttempts)
-		method = next(node for node in pluginClass.body if isinstance(node, ast.FunctionDef) and node.name == "_retryDirectChatAction")
-		namespace = {}
-		exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
-		subject = type("Subject", (), {
-			"_pendingDirectChatAction": ("title", "archive", "codex", 0),
-			"_conversationWindowHandle": 222,
-			"_pendingDirectChatActionWindowHandle": 111,
-		})()
-		namespace["_retryDirectChatAction"](subject)
-		self.assertIsNone(subject._pendingDirectChatAction)
-		pluginTree = ast.parse(PLUGIN_PATH.read_text(encoding="utf-8"))
-		pluginClass = next(node for node in pluginTree.body if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin")
-		method = next(node for node in pluginClass.body if isinstance(node, ast.FunctionDef) and node.name == "_announceContinuousWorkingClick")
-		namespace = {}
-		exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
-		# No settings, clock, or audio dependencies: pending completion must return
-		# before consulting any of them, including a forced submission tick.
-		subject = type("Subject", (), {"_pendingResponseCompletionAt": 123.0})()
-		self.assertIsNone(namespace["_announceContinuousWorkingClick"](subject))
-		self.assertIsNone(namespace["_announceContinuousWorkingClick"](subject, force=True))
 
 	def test_package_audit_checks_current_source_bytes(self):
 		auditSource = AUDIT_PATH.read_text(encoding="utf-8")

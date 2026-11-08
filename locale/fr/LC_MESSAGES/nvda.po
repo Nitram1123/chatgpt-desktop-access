@@ -1708,3 +1708,11 @@ msgstr "Chats récents trouvés : {recent}. Chats archivés trouvés : {archived
 #: globalPlugins/codexStatusAnnouncer/messageListDialog.py:71
 msgid "{shown} of {total} cached messages shown; older messages remain in ChatGPT's conversation view"
 msgstr "{shown} messages en cache affichés sur {total}. Les plus anciens restent accessibles dans la conversation ChatGPT"
+
+#: appModules/chatgpt.py
+msgid "Read the native task timer"
+msgstr "Lire le compteur natif de la tâche"
+
+#: globalPlugins/codexStatusAnnouncer/__init__.py
+msgid "No active task timer"
+msgstr "Aucun compteur de tâche actif"
