@@ -448,6 +448,23 @@ class StatusMessageTests(unittest.TestCase):
 			self.assertEqual(b"first\nsecond\nthird\n", packageBuilder.packageData(textPath))
 			self.assertEqual(binary, packageBuilder.packageData(binaryPath))
 
+	def test_class_annotations_load_on_the_oldest_supported_python(self):
+		# NVDA 2023 runs Python 3.7, which evaluates class annotations when the
+		# module loads, so an unquoted "X | None" stops the module from loading.
+		for path in sorted((PROJECT_ROOT / "appModules").glob("*.py")) + sorted(PLUGIN_PATH.parent.glob("*.py")):
+			tree = ast.parse(path.read_text(encoding="utf-8"))
+			if any(isinstance(node, ast.ImportFrom) and node.module == "__future__" for node in tree.body):
+				continue
+			for node in ast.walk(tree):
+				if isinstance(node, ast.ClassDef):
+					for statement in node.body:
+						if isinstance(statement, ast.AnnAssign):
+							union = any(
+								isinstance(part, ast.BinOp) and isinstance(part.op, ast.BitOr)
+								for part in ast.walk(statement.annotation)
+							)
+							self.assertFalse(union, f"{path.name}:{statement.lineno} needs a quoted annotation")
+
 	def test_package_builder_includes_docs_and_only_current_tiered_sounds(self):
 		paths = tuple(path.relative_to(PROJECT_ROOT).as_posix() for path in packageBuilder.packageFiles(PROJECT_ROOT))
 		for required in (
@@ -1934,6 +1951,7 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertTrue(chatActionMatches("pin", "Pin chat"))
 		self.assertTrue(chatActionMatches("pin", "Unpin chat"))
 		self.assertTrue(chatActionMatches("archive", "Archive chat"))
+		self.assertTrue(chatActionMatches("archive", "Archiver le chat"))
 		self.assertFalse(chatActionMatches("archive", "Archive project"))
 		self.assertFalse(chatActionMatches("pin", "Pin message"))
 
@@ -1986,10 +2004,10 @@ class StatusMessageTests(unittest.TestCase):
 			node for node in pluginTree.body
 			if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin"
 		)
-		method = next(
+		methods = [
 			node for node in pluginClass.body
-			if isinstance(node, ast.FunctionDef) and node.name == "_retryDirectChatAction"
-		)
+			if isinstance(node, ast.FunctionDef) and node.name in ("_retryDirectChatAction", "_invokeChatAction")
+		]
 
 		class ChatButton:
 			def __init__(self): self.focused = 0
@@ -2013,9 +2031,11 @@ class StatusMessageTests(unittest.TestCase):
 			})(),
 			"_": lambda text: text,
 		}
-		exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
+		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 
 		class Subject:
+			_invokeChatAction = namespace["_invokeChatAction"]
+
 			def __init__(self):
 				self._pendingDirectChatAction = ("Selected chat", "archive", "codex", 0)
 				self._chatActionRetryTimer = object()

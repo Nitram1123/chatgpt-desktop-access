@@ -1205,14 +1205,22 @@ def _sameNVDAObject(first, second):
 
 	NVDA creates a new object each time it looks a control up, so ``is`` is
 	false for two lookups of the same dialog. NVDA's own equality compares the
-	underlying control.
+	underlying control. Chromium wrappers can also be matched by their IA2
+	identity within the same window.
 	"""
 	if first is None or second is None:
 		return False
 	if first is second:
 		return True
 	try:
-		return bool(first == second)
+		if first == second:
+			return True
+		uniqueID = getattr(first, "IA2UniqueID", None)
+		if not uniqueID or uniqueID != getattr(second, "IA2UniqueID", None):
+			return False
+		firstWindow = getattr(first, "IA2WindowHandle", None) or getattr(first, "windowHandle", None)
+		secondWindow = getattr(second, "IA2WindowHandle", None) or getattr(second, "windowHandle", None)
+		return bool(firstWindow) and firstWindow == secondWindow
 	except Exception:
 		return False
 
@@ -3817,6 +3825,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._pendingDirectChatActionWindowHandle = self._conversationWindowHandle
 		self._retryDirectChatAction()
 
+	def _invokeChatAction(self, actionButton, mode):
+		_pressControl(actionButton)
+		self._chatHistoryCacheCurrent[mode] = False
+		self._pendingChatHistorySnapshots[mode] = None
+		self._pendingChatHistorySnapshotAt[mode] = 0.0
+		self._bufferDirty = True
+		self._schedulePoll(delay=250, requestInspection=True)
+
 	def _retryDirectChatAction(self):
 		self._chatActionRetryTimer = None
 		pending = self._pendingDirectChatAction
@@ -3845,13 +3861,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			actionButton = self._namedChatActionButton(chatButton, action)
 			if actionButton is not None:
 				actionLabel = " ".join(str(getattr(actionButton, "name", "") or "").split())
-				_pressControl(actionButton)
+				self._invokeChatAction(actionButton, mode)
 				self._pendingDirectChatAction = None
-				self._chatHistoryCacheCurrent[mode] = False
-				self._pendingChatHistorySnapshots[mode] = None
-				self._pendingChatHistorySnapshotAt[mode] = 0.0
-				self._bufferDirty = True
-				self._schedulePoll(delay=250, requestInspection=True)
 				ui.message(_("{action} requested").format(
 					action=actionLabel or _("Chat action"),
 				))

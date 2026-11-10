@@ -1743,3 +1743,21 @@ msgstr "Aucun chat trouvé dans la section Récents"
 
 msgid "Move to the first chat in Recents"
 msgstr "Aller au premier chat de la section Récents"
+
+msgid "Archive the focused sidebar chat and move to the next chat"
+msgstr "Archiver le chat sous le focus dans la barre latérale et aller au suivant"
+
+msgid "Move to a chat in the sidebar to archive it"
+msgstr "Place-toi sur un chat dans la barre latérale pour l’archiver"
+
+msgid "Could not activate Archive chat"
+msgstr "Impossible d’activer le bouton Archiver le chat"
+
+msgid "Chat archived. No other chats in this list"
+msgstr "Chat archivé. Aucun autre chat dans cette liste"
+
+msgid "Chat archived. Could not restore focus in the list"
+msgstr "Chat archivé. Impossible de replacer le focus dans la liste"
+
+msgid "Could not confirm that the chat was archived"
+msgstr "Impossible de confirmer l’archivage du chat"

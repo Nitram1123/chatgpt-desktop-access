@@ -9,6 +9,9 @@ follows stable NVDA.
 - Added two assignable NVDA commands to move focus to the first project or
   the first recent chat. The commands close Activity view when it is open,
   show the sidebar if needed, and expand the requested section.
+- Added an assignable NVDA command to archive the chat under focus or the
+  browse cursor in the sidebar. After archiving, focus moves to the next chat
+  in the list, or the previous chat if the archived chat was last.
 - Fixed Control+1 through Control+0 for recent messages when ChatGPT uses a
   different interface language. The add-on identifies user and assistant
   messages from their accessibility headings.
@@ -32,6 +35,10 @@ follows stable NVDA.
   with Activity view open, the sidebar hidden, and the section collapsed.
   Check that focus lands on the first item without opening it. Repeat with
   the ChatGPT interface in English and French.
+- Assign **Archive the focused sidebar chat and move to the next chat** in
+  NVDA's Input Gestures dialog. Try it on disposable chats in focus and browse
+  mode, including the last chat in the list. Check that only the selected chat
+  is archived and that focus stays in the sidebar. Repeat in English and French.
 - Change ChatGPT's interface language and open a conversation with at least ten
   messages. Press Control+1 for the newest message and Control+0 for the tenth
   most recent. Check that the shortcuts read both user and assistant messages.

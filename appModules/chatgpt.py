@@ -9,6 +9,7 @@ import appModuleHandler
 import core
 import ui
 import winUser
+from browseMode import BrowseModeDocumentTreeInterceptor
 from controlTypes import Role, State
 from keyboardHandler import KeyboardInputGesture
 from logHandler import log
@@ -47,6 +48,17 @@ class _SidebarFocusRequest:
 	sidebarOpened: bool = False
 	headerFocused: bool = False
 	headerActivated: bool = False
+
+
+@dataclass
+class _ChatArchiveRequest:
+	windowHandle: int
+	chatList: NVDAObject
+	row: NVDAObject
+	index: int
+	# Quoted so Python 3.7 in NVDA 2023 does not evaluate the union at import.
+	fallback: "NVDAObject | None"
+	checksLeft: int = 12
 
 
 def _walkObjects(root, maxDepth):
@@ -184,6 +196,56 @@ def _activateFocusedSidebarControl(control, windowHandle, *, activity=False):
 	return True
 
 
+def _iterArchivableChats(chatList):
+	from globalPlugins.codexStatusAnnouncer.core import chatActionMatches
+
+	for row, control in _iterChatRows(chatList.children):
+		for button in (*control.children, *row.children):
+			if button.role == Role.BUTTON and button is not control and chatActionMatches("archive", button.name):
+				yield row, control, button
+				break
+
+
+def _findSidebarChat(sidebar, position, matchFocusedState=False):
+	from globalPlugins.codexStatusAnnouncer import _sameNVDAObject
+
+	if position is None:
+		return None
+	focus = position
+	ancestors = []
+	while position is not None and position.role not in (Role.DOCUMENT, Role.LANDMARK):
+		ancestors.append(position)
+		position = position.parent
+	if not ancestors:
+		return None
+	canMatchFocusedState = matchFocusedState and State.FOCUSED in focus.states
+	focusedTargets = []
+	for chatList in _walkObjects(sidebar, 12):
+		if chatList.role != Role.LIST:
+			continue
+		for index, (row, control, button) in enumerate(_iterArchivableChats(chatList)):
+			target = chatList, row, index, button
+			candidates = (row, control, button, *control.children)
+			if any(_sameNVDAObject(item, ancestor) for item in candidates for ancestor in ancestors):
+				return target
+			# Some focus objects are from another accessibility backend. Require one unique focused row.
+			if canMatchFocusedState and any(
+				item.role == focus.role and State.FOCUSED in item.states and item.name == focus.name
+				for item in candidates
+			):
+				focusedTargets.append(target)
+	return focusedTargets[0] if len(focusedTargets) == 1 else None
+
+
+def _chatListFallback(sidebar, chatList):
+	parent = chatList.parent
+	while parent is not None and parent != sidebar:
+		if parent.role == Role.LISTITEM:
+			return _getFirstProject(parent)
+		parent = parent.parent
+	return next((child for child in sidebar.children if child.role == Role.BUTTON and child.name in _RECENTS_LABELS), None)
+
+
 def _activeToolkitPlugin():
 	"""Return the running toolkit instance without creating another global plugin."""
 	try:
@@ -219,6 +281,7 @@ class AppModule(appModuleHandler.AppModule):
 		super().__init__(*args, **kwargs)
 		self._sidebarFocusRequest = None
 		self._sidebarFocusTimer = None
+		self._chatArchiveRequest = None
 		self._titleWatch = None
 		self._lastChatTitle = None
 		self._scheduleTitleWatch(0)
@@ -229,6 +292,7 @@ class AppModule(appModuleHandler.AppModule):
 
 	def event_appModule_loseFocus(self):
 		self._cancelSidebarFocus()
+		self._chatArchiveRequest = None
 		if self._titleWatch is not None:
 			self._titleWatch.Stop()
 			self._titleWatch = None
@@ -249,9 +313,12 @@ class AppModule(appModuleHandler.AppModule):
 		self._titleWatch = None
 		window = api.getForegroundObject()
 		if window is None or window.processID != self.processID:
+			self._chatArchiveRequest = None
 			self._lastChatTitle = None
 			return
 		self._scheduleTitleWatch(500)
+		if self._chatArchiveRequest is not None:
+			self._continueChatArchive(window)
 		title = _chatTitle(window)
 		if not title:
 			return
@@ -375,6 +442,78 @@ class AppModule(appModuleHandler.AppModule):
 	@script(description=_("Move to the first chat in Recents"))
 	def script_focusFirstRecentChat(self, gesture):
 		self._focusSidebarSection("recents")
+
+	@script(description=_("Archive the focused sidebar chat and move to the next chat"))
+	def script_archiveSidebarChat(self, gesture):
+		from globalPlugins.codexStatusAnnouncer import _pressControl
+
+		if self._chatArchiveRequest is not None or getLastScriptRepeatCount():
+			return
+		foreground = api.getForegroundObject()
+		if foreground is None or foreground.processID != self.processID:
+			return
+		sidebar = _getSidebar(_getMainDocument(foreground))
+		if sidebar is None:
+			ui.message(_("The sidebar is unavailable"))
+			return
+		focus = api.getFocusObject()
+		interceptor = getattr(focus, "treeInterceptor", None)
+		browseMode = isinstance(interceptor, BrowseModeDocumentTreeInterceptor) and not interceptor.passThrough
+		try:
+			position = interceptor.currentNVDAObject if browseMode else focus
+		except (LookupError, NotImplementedError):
+			position = None
+		target = _findSidebarChat(sidebar, position)
+		if target is None and not browseMode:
+			target = _findSidebarChat(sidebar, NVDAObject.objectWithFocus() or focus, matchFocusedState=True)
+		if target is None:
+			ui.message(_("Move to a chat in the sidebar to archive it"))
+			return
+		chatList, row, index, button = target
+		request = _ChatArchiveRequest(foreground.windowHandle, chatList, row, index, _chatListFallback(sidebar, chatList))
+		try:
+			plugin = _activeToolkitPlugin()
+			if plugin is not None and plugin._conversationWindowHandle == foreground.windowHandle:
+				plugin._invokeChatAction(button, plugin._conversationMode)
+			else:
+				_pressControl(button)
+		except (LookupError, NotImplementedError):
+			ui.message(_("Could not activate Archive chat"))
+			return
+		self._chatArchiveRequest = request
+		if self._titleWatch is None:
+			self._scheduleTitleWatch(0)
+
+	def _continueChatArchive(self, window):
+		from globalPlugins.codexStatusAnnouncer import _sameNVDAObject
+
+		request = self._chatArchiveRequest
+		if request.windowHandle != window.windowHandle:
+			self._chatArchiveRequest = None
+			return
+		try:
+			sidebar = _getSidebar(_getMainDocument(window))
+			if sidebar is not None:
+				chatList = next((obj for obj in _walkObjects(sidebar, 12) if (
+					obj.role == Role.LIST and _sameNVDAObject(request.chatList, obj)
+				)), None)
+				if chatList is not None and not any(_sameNVDAObject(request.row, item) for item in chatList.children):
+					self._chatArchiveRequest = None
+					chats = [control for row, control, archiveButton in _iterArchivableChats(chatList)]
+					target = chats[min(request.index, len(chats) - 1)] if chats else request.fallback
+					if target is not None:
+						target.setFocus()
+					if not chats:
+						ui.message(_("Chat archived. No other chats in this list"))
+					return
+		except (LookupError, NotImplementedError):
+			if self._chatArchiveRequest is None:
+				ui.message(_("Chat archived. Could not restore focus in the list"))
+				return
+		request.checksLeft -= 1
+		if not request.checksLeft:
+			self._chatArchiveRequest = None
+			ui.message(_("Could not confirm that the chat was archived"))
 
 	@script(description=_("Read the most recent ChatGPT message"))
 	def script_readMostRecentChatMessage(self, gesture):
