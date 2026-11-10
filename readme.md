@@ -162,9 +162,12 @@ the add-on's Settings panel.
 
 ## Input gestures
 
-All add-on actions appear under **NVDA > Preferences > Input Gestures > ChatGPT
-Desktop Access**. A default gesture can be changed or removed there, and an
-unassigned action can be given a gesture if wanted.
+With focus in ChatGPT Desktop or Codex, open **NVDA > Preferences > Input
+Gestures > ChatGPT Desktop Access** to find the add-on commands. A default
+gesture can be changed or removed there, and an unassigned action can be given
+a gesture. These commands are available while the app has focus, so the same
+gesture can be used for an application-specific command in another app.
+Existing assignments for commands that were previously global are migrated.
 
 ### Chat titles
 

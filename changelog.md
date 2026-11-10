@@ -13,6 +13,9 @@ follows stable NVDA.
   NVDA's focus ancestry when it belongs to the requested window, and pending
   titles are read as soon as native focus handling finishes, without a fixed delay.
 
+- Scoped the remaining global commands to ChatGPT Desktop and Codex. Existing
+  gesture assignments are migrated so the shortcuts can be reused in other apps.
+
 ### What to test
 
 - Switch between conversations using the sidebar, chat history, and native
@@ -23,6 +26,10 @@ follows stable NVDA.
   speech resumes. Switch to another app and check that its speech is unaffected.
 - Pause announcements or disable speech output and check that the add-on does
   not silence native focus speech. Reload NVDA plugins and repeat a chat switch.
+
+- Open Input Gestures from ChatGPT and verify the application-specific actions.
+  Assign the same shortcut in another app and check that each command stays in
+  its own application. Confirm that existing custom assignments are retained.
 
 ## 2026.3.0
 

@@ -585,21 +585,22 @@ class StatusMessageTests(unittest.TestCase):
 		plugin = PLUGIN_PATH.read_text(encoding="utf-8")
 		self.assertIn('CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage"', plugin)
 		self.assertIn("wx.LaunchDefaultBrowser(CHATGPT_USAGE_URL)", plugin)
-		tree = ast.parse(plugin)
-		pluginClass = next(
+		appModule = CHATGPT_APP_MODULE_PATH.read_text(encoding="utf-8")
+		tree = ast.parse(appModule)
+		appClass = next(
 			node for node in tree.body
-			if isinstance(node, ast.ClassDef) and node.name == "GlobalPlugin"
+			if isinstance(node, ast.ClassDef) and node.name == "AppModule"
 		)
 		methods = {
-			node.name: node for node in pluginClass.body
+			node.name: node for node in appClass.body
 			if isinstance(node, ast.FunctionDef)
 		}
 		self.assertIn("script_openUsageStatistics", methods)
 		self.assertIn("script_openUsageCredits", methods)
 		self.assertTrue(methods["script_openUsageStatistics"].decorator_list)
 		self.assertFalse(methods["script_openUsageCredits"].decorator_list)
-		self.assertIn('description=_("Open ChatGPT usage and credits")', plugin)
-		legacyBody = ast.get_source_segment(plugin, methods["script_openUsageCredits"])
+		self.assertIn('description=_("Open ChatGPT usage and credits")', appModule)
+		legacyBody = ast.get_source_segment(appModule, methods["script_openUsageCredits"])
 		self.assertIn("self.script_openUsageStatistics(gesture)", legacyBody)
 
 	def test_speech_and_braille_page_identifies_active_and_independent_profiles(self):
@@ -940,11 +941,15 @@ class StatusMessageTests(unittest.TestCase):
 					"globalPlugins.codexStatusAnnouncer.GlobalPlugin": {
 						"toggleVoiceMode": "kb:NVDA+shift+v",
 						"readMostRecentChatMessage": ["kb:control+shift+1", "kb:control+alt+1"],
-						"openChatHistory": "kb:NVDA+alt+o",
+						"openChatHistory": "kb:NVDA+alt+h",
+						"openUsageCredits": "kb:NVDA+alt+u",
 						"None": ["kb:control+1", "kb:NVDA+alt+x"],
 					},
 					"appModules.chatgpt.AppModule": {
 						"readMostRecentChatMessage": "kb:control+shift+1",
+					},
+					"appModules.claude.AppModule": {
+						"openChatHistory": "kb:NVDA+alt+h",
 					},
 				}
 				self.removed = []
@@ -962,16 +967,18 @@ class StatusMessageTests(unittest.TestCase):
 				"manager": type("Manager", (), {"userGestureMap": userMap})(),
 				"normalizeGestureIdentifier": staticmethod(lambda gesture: gesture.casefold()),
 			})(),
-			"APP_SCOPED_SCRIPT_NAMES": (
-				"readMostRecentChatMessage", "toggleVoiceMode", "toggleMicrophoneMute",
-			),
-			"APP_SCOPED_DEFAULT_GESTURES": ("kb:control+1", "kb:NVDA+alt+v"),
+			**{
+				node.targets[0].id: ast.literal_eval(node.value)
+				for node in tree.body
+				if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+				and node.targets[0].id in {"APP_SCOPED_SCRIPT_NAMES", "APP_SCOPED_DEFAULT_GESTURES"}
+			},
 			"log": type("Log", (), {"debugWarning": staticmethod(lambda *args, **kwargs: None)})(),
 		}
 		exec(compile(ast.Module(body=[function], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
-		self.assertEqual(4, namespace["_migrateApplicationGestureMappings"]())
+		self.assertEqual(6, namespace["_migrateApplicationGestureMappings"]())
 		self.assertEqual(1, userMap.saveCalls)
-		self.assertEqual(4, len(userMap.removed))
+		self.assertEqual(6, len(userMap.removed))
 		self.assertIn(
 			("kb:nvda+shift+v", "appModules.chatgpt", "AppModule", "toggleVoiceMode"),
 			userMap.added,
@@ -985,7 +992,10 @@ class StatusMessageTests(unittest.TestCase):
 			("kb:nvda+alt+x", "appModules.chatgpt", "AppModule", None),
 			userMap.added,
 		)
-		self.assertFalse(any(item[-1] == "openChatHistory" for item in userMap.removed))
+		for gesture, script in (("kb:nvda+alt+h", "openChatHistory"), ("kb:nvda+alt+u", "openUsageCredits")):
+			self.assertIn((gesture, "globalPlugins.codexStatusAnnouncer", "GlobalPlugin", script), userMap.removed)
+			self.assertIn((gesture, "appModules.chatgpt", "AppModule", script), userMap.added)
+		self.assertFalse(any(item[1] == "appModules.claude" for item in userMap.removed + userMap.added))
 
 	def test_voice_control_labels_are_exact_and_do_not_match_speaker_controls(self):
 		for label, expected in (
@@ -1226,15 +1236,15 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertIn("message = _completeChangelogMessage()", plugin)
 		self.assertIn("_showBrowseableMessageAtTop(", plugin)
 		self.assertIn('CURRENT_RELEASE_NOTES, _("ChatGPT Desktop Access — what\'s new")', plugin)
-		self.assertIn('scriptCategory = _("ChatGPT Desktop Access")', plugin)
+		self.assertIn('scriptCategory = _("ChatGPT Desktop Access")', appModule)
 		self.assertIn('self._lastSpeechMessage', plugin)
 		self.assertIn('self._lastBrailleMessage', plugin)
 		self.assertIn('version=ADDON_VERSION', plugin)
 		self.assertNotIn("Unable to load the complete startup changelog", plugin)
 		self.assertNotIn("import sqlite3", CORE_PATH.read_text(encoding="utf-8"))
 		self.assertIn("_repairConfiguration()", plugin)
-		self.assertIn("script_runCompatibilitySelfTest", plugin)
-		self.assertIn("script_copyLatestFullProgress", plugin)
+		self.assertIn("script_runCompatibilitySelfTest", appModule)
+		self.assertIn("script_copyLatestFullProgress", appModule)
 		self.assertIn("_onExportSettings", plugin)
 		self.assertIn("_onImportSettings", plugin)
 		self.assertIn("_loadControlsFromConfiguration", plugin)
@@ -1251,7 +1261,7 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertIn("for index in range(len(self._activityCategories)):", plugin)
 		self.assertIn('defaultFile="chatgpt-desktop-access-settings.json"', plugin)
 		self.assertIn("_onSaveSupportReport", plugin)
-		self.assertIn("script_saveSupportReport", plugin)
+		self.assertIn("script_saveSupportReport", appModule)
 		self.assertNotIn("script_openAddFilesAndMore", plugin)
 		self.assertNotIn("script_openModelSelector", plugin)
 		self.assertNotIn("script_openChangePermissions", plugin)
@@ -7182,7 +7192,7 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertIn("MAX_UIA_ELEMENTS - len(elements)", source)
 		self.assertIn("FindAllBuildCache", source)
 		pluginSource = PLUGIN_PATH.read_text(encoding="utf-8")
-		self.assertIn("def script_captureAttachmentMenuDiagnostics", pluginSource)
+		self.assertIn("def _captureAttachmentMenuDiagnostics", pluginSource)
 		self.assertIn('_("Attachment menu diagnostics:")', pluginSource)
 		self.assertIn('self._attachmentDiagnostics.noteButtonActivated(obj, "expanded event")', pluginSource)
 

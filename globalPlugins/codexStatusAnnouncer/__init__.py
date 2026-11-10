@@ -31,7 +31,6 @@ from treeInterceptorHandler import RootProxyTextInfo
 from gui import guiHelper
 from gui.settingsDialogs import NVDASettingsDialog, SettingsPanel
 from logHandler import log
-from scriptHandler import script
 from speech.extensions import filter_speechSequence
 
 from .browserAccess import (
@@ -193,6 +192,12 @@ APP_SCOPED_SCRIPT_NAMES = (
 	"readNinthMostRecentChatMessage", "readTenthMostRecentChatMessage",
 	"toggleVoiceMode", "toggleMicrophoneMute", "toggleConversationMode",
 	"openConversationMessages", "reportOrSwitchComposerMode", "reportComposerAttachments",
+	"repeatLatestStatus", "toggleVerbosity", "togglePause",
+	"previousHistory", "nextHistory", "showHistory",
+	"clearHistory", "togglePrivacy", "showDiagnostics",
+	"copyDiagnostics", "saveSupportReport", "captureAttachmentMenuDiagnostics",
+	"copyLatestFullProgress", "runCompatibilitySelfTest", "openUsageStatistics",
+	"openChatHistory", "openUsageCredits",
 )
 APP_SCOPED_DEFAULT_GESTURES = (
 	"kb:control+1", "kb:control+2", "kb:control+3", "kb:control+4", "kb:control+5",
@@ -1450,7 +1455,6 @@ class CodexPromptEditableTextOverlay:
 
 
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
-	scriptCategory = _("ChatGPT Desktop Access")
 
 	def chooseNVDAObjectOverlayClasses(self, obj, clsList):
 		"""Enhance known controls without adding or intercepting gestures."""
@@ -6677,8 +6681,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self._speakOnce(message, "commentary", brailleMessage=fullMessage)
 		return True
 
-	@script(description=_("Report current Codex activity or repeat the latest message"))
-	def script_repeatLatestStatus(self, gesture):
+	def _repeatLatestStatus(self):
 		elapsed = self._nativeTimerSeconds
 		agentName = _("ChatGPT") if self._conversationMode == "chatgpt" else _("Codex")
 		message = currentActivitySummary(
@@ -6690,29 +6693,18 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			brailleMessage=self._latestFullMessage or message,
 		)
 
-	@script(description=_("Toggle Minimal and Full Codex announcements"))
-	def script_toggleVerbosity(self, gesture):
+	def _toggleVerbosity(self):
 		conf = _settings()
 		conf["verbosity"] = "minimal" if conf["verbosity"] == "full" else "full"
 		modeName = _("Minimal") if conf["verbosity"] == "minimal" else _("Full")
 		message = _("Codex announcements: {mode}").format(mode=modeName)
 		_send(message, conf["speech"], conf["braille"], "other", conf["soundWhenSpeechUnavailable"])
 
-	@script(description=_("Pause or resume Codex announcements"))
-	def script_togglePause(self, gesture):
+	def _togglePause(self):
 		self._paused = not self._paused
 		ui.message(_("Codex announcements paused") if self._paused else _("Codex announcements resumed"))
 
-	@script(description=_("Read the previous Codex announcement"))
-	def script_previousHistory(self, gesture):
-		self._historyMessage(-1)
-
-	@script(description=_("Read the next Codex announcement"))
-	def script_nextHistory(self, gesture):
-		self._historyMessage(1)
-
-	@script(description=_("Show Codex announcement history"))
-	def script_showHistory(self, gesture):
+	def _showHistory(self):
 		if not self._speechHistory and not self._brailleHistory:
 			ui.message(_("No activity announcement history is available"))
 			return
@@ -6723,24 +6715,20 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			sections.append(_("Braille history") + "\n" + "\n".join(self._brailleHistory.items()))
 		ui.browseableMessage("\n\n".join(sections), title=_("ChatGPT Desktop Access announcement history"))
 
-	@script(description=_("Clear Codex announcement history"))
-	def script_clearHistory(self, gesture):
+	def _clearHistory(self):
 		self._speechHistory.clear()
 		self._brailleHistory.clear()
 		ui.message(_("Codex announcement history cleared"))
 
-	@script(description=_("Toggle Codex privacy redaction"))
-	def script_togglePrivacy(self, gesture):
+	def _togglePrivacy(self):
 		conf = _settings()
 		conf["redactSensitive"] = not conf["redactSensitive"]
 		ui.message(_("Codex privacy redaction on") if conf["redactSensitive"] else _("Codex privacy redaction off"))
 
-	@script(description=_("Show sanitized ChatGPT Desktop Access diagnostics"))
-	def script_showDiagnostics(self, gesture):
+	def _showDiagnostics(self):
 		ui.browseableMessage(self._diagnosticReport(), title=_("ChatGPT Desktop Access diagnostics"))
 
-	@script(description=_("Copy sanitized ChatGPT Desktop Access diagnostics"))
-	def script_copyDiagnostics(self, gesture):
+	def _copyDiagnostics(self):
 		if not wx.TheClipboard.Open():
 			ui.message(_("Could not open the clipboard"))
 			return
@@ -6751,16 +6739,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			wx.TheClipboard.Close()
 		ui.message(_("Sanitized Codex diagnostics copied"))
 
-	@script(description=_("Save a sanitized ChatGPT Desktop Access support report"))
-	def script_saveSupportReport(self, gesture):
+	def _saveSupportReport(self):
 		_saveSupportReport(gui.mainFrame, self._diagnosticReport())
 
-	@script(description=_("Capture diagnostics for the open Add files and more menu"))
-	def script_captureAttachmentMenuDiagnostics(self, gesture):
+	def _captureAttachmentMenuDiagnostics(self):
 		self._attachmentDiagnostics.captureNow()
 
-	@script(description=_("Copy latest full Codex progress"))
-	def script_copyLatestFullProgress(self, gesture):
+	def _copyLatestFullProgress(self):
 		if not self._latestFullMessage:
 			ui.message(_("No complete Codex progress message is available"))
 			return
@@ -6774,8 +6759,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			wx.TheClipboard.Close()
 		ui.message(_("Latest full Codex progress copied"))
 
-	@script(description=_("Run ChatGPT Desktop Access compatibility self-test"))
-	def script_runCompatibilitySelfTest(self, gesture):
+	def _runCompatibilitySelfTest(self):
 		checks = [
 			_("Global plugin loaded: yes"),
 			_("Codex monitoring attached: {value}").format(value=_("yes") if self._buffer else _("no")),
@@ -6795,13 +6779,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		]
 		_showBrowseableMessageAtTop("\n".join(checks), _("ChatGPT Desktop Access — compatibility self-test"))
 
-	@script(description=_("Open ChatGPT usage and credits"))
-	def script_openUsageStatistics(self, gesture):
+	def _openUsageStatistics(self):
 		_openUsageDashboard(_("Opening ChatGPT usage and credits. No purchase will be made automatically."))
-
-	def script_openUsageCredits(self, gesture):
-		# Retain existing user gesture assignments without exposing a duplicate action.
-		self.script_openUsageStatistics(gesture)
 
 	def _cancelPendingChatHistoryOpen(self):
 		"""Cancel an automatic History open without affecting an active dialog."""
@@ -6934,8 +6913,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		)
 		return True
 
-	@script(description=_("Open searchable and arrow-navigable ChatGPT or Codex chat history"))
-	def script_openChatHistory(self, gesture):
+	def _openChatHistory(self):
 		"""Expand native Recents, then show searchable Recent and Archived lists."""
 		focus = api.getFocusObject()
 		if not _isChatGPTObject(focus):

@@ -601,3 +601,71 @@ class AppModule(appModuleHandler.AppModule):
 	def script_toggleConversationMode(self, gesture):
 		"""Open ChatGPT's native selector for manual Arrow-key selection."""
 		self._runToolkitCommand("_openConversationModeSelector")
+
+	@script(description=_("Report current Codex activity or repeat the latest message"))
+	def script_repeatLatestStatus(self, gesture):
+		self._runToolkitCommand("_repeatLatestStatus")
+
+	@script(description=_("Toggle Minimal and Full Codex announcements"))
+	def script_toggleVerbosity(self, gesture):
+		self._runToolkitCommand("_toggleVerbosity")
+
+	@script(description=_("Pause or resume Codex announcements"))
+	def script_togglePause(self, gesture):
+		self._runToolkitCommand("_togglePause")
+
+	@script(description=_("Read the previous Codex announcement"))
+	def script_previousHistory(self, gesture):
+		self._runToolkitCommand("_historyMessage", -1)
+
+	@script(description=_("Read the next Codex announcement"))
+	def script_nextHistory(self, gesture):
+		self._runToolkitCommand("_historyMessage", 1)
+
+	@script(description=_("Show Codex announcement history"))
+	def script_showHistory(self, gesture):
+		self._runToolkitCommand("_showHistory")
+
+	@script(description=_("Clear Codex announcement history"))
+	def script_clearHistory(self, gesture):
+		self._runToolkitCommand("_clearHistory")
+
+	@script(description=_("Toggle Codex privacy redaction"))
+	def script_togglePrivacy(self, gesture):
+		self._runToolkitCommand("_togglePrivacy")
+
+	@script(description=_("Show sanitized ChatGPT Desktop Access diagnostics"))
+	def script_showDiagnostics(self, gesture):
+		self._runToolkitCommand("_showDiagnostics")
+
+	@script(description=_("Copy sanitized ChatGPT Desktop Access diagnostics"))
+	def script_copyDiagnostics(self, gesture):
+		self._runToolkitCommand("_copyDiagnostics")
+
+	@script(description=_("Save a sanitized ChatGPT Desktop Access support report"))
+	def script_saveSupportReport(self, gesture):
+		self._runToolkitCommand("_saveSupportReport")
+
+	@script(description=_("Capture diagnostics for the open Add files and more menu"))
+	def script_captureAttachmentMenuDiagnostics(self, gesture):
+		self._runToolkitCommand("_captureAttachmentMenuDiagnostics")
+
+	@script(description=_("Copy latest full Codex progress"))
+	def script_copyLatestFullProgress(self, gesture):
+		self._runToolkitCommand("_copyLatestFullProgress")
+
+	@script(description=_("Run ChatGPT Desktop Access compatibility self-test"))
+	def script_runCompatibilitySelfTest(self, gesture):
+		self._runToolkitCommand("_runCompatibilitySelfTest")
+
+	@script(description=_("Open ChatGPT usage and credits"))
+	def script_openUsageStatistics(self, gesture):
+		self._runToolkitCommand("_openUsageStatistics")
+
+	def script_openUsageCredits(self, gesture):
+		# Retain existing user gesture assignments without exposing a duplicate action.
+		self.script_openUsageStatistics(gesture)
+
+	@script(description=_("Open searchable and arrow-navigable ChatGPT or Codex chat history"))
+	def script_openChatHistory(self, gesture):
+		self._runToolkitCommand("_openChatHistory")
