@@ -456,7 +456,12 @@ class StatusMessageTests(unittest.TestCase):
 		):
 			self.assertIn(required, paths)
 		self.assertIn("globalPlugins/codexStatusAnnouncer/bufferUpdates.py", paths)
-		self.assertEqual(68, len(paths))
+		# Every translation ships its compiled catalog and its translated manifest.
+		languages = sorted(path.parents[1].name for path in (PROJECT_ROOT / "locale").glob("*/LC_MESSAGES/nvda.po"))
+		for language in languages:
+			self.assertIn(f"locale/{language}/LC_MESSAGES/nvda.mo", paths)
+			self.assertIn(f"locale/{language}/manifest.ini", paths)
+		self.assertEqual(66 + 2 * len(languages), len(paths))
 		self.assertIn("globalPlugins/codexStatusAnnouncer/attachmentDiagnostics.py", paths)
 		self.assertIn("globalPlugins/codexStatusAnnouncer/attachmentMenuDialog.py", paths)
 		self.assertEqual(51, sum(path.endswith(".wav") for path in paths))
@@ -719,7 +724,7 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertEqual("codexStatusAnnouncer", metadata["addonId"])
 		self.assertEqual(expectedVersion, metadata["addonVersionName"])
 		self.assertEqual(expectedVersionNumber, metadata["addonVersionNumber"])
-		self.assertEqual({"major": 2026, "minor": 2, "patch": 0}, metadata["lastTestedVersion"])
+		self.assertEqual({"major": 2026, "minor": 3, "patch": 0}, metadata["lastTestedVersion"])
 		self.assertEqual(url, metadata["URL"])
 		self.assertEqual(64, len(metadata["sha256"]))
 		self.assertEqual("ChatGPT Desktop Access for NVDA", metadata["displayName"])
@@ -1118,7 +1123,7 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertIn("url = https://github.com/jcoffin1/chatgpt-desktop-access", manifest)
 		self.assertIn("docFileName = readme.md", manifest)
 		self.assertIn("minimumNVDAVersion = 2023.1.0", manifest)
-		self.assertIn("lastTestedNVDAVersion = 2026.2.0", manifest)
+		self.assertIn("lastTestedNVDAVersion = 2026.3.0", manifest)
 		self.assertIn("updateChannel = None", manifest)
 		self.assertIn('"protectBrailleReading": "boolean(default=True)"', plugin)
 		self.assertIn('conf["protectBrailleReading"], self._appFocusState', plugin)

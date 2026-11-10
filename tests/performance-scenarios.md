@@ -1,4 +1,4 @@
-# 2026.2.20 responsiveness check
+# 2026.3.0 responsiveness check
 
 Run with NVDA 2026.2 and the test package installed only after choosing to
 install it. Use the same large conversation for before/after comparisons. In

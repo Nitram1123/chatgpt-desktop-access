@@ -4,7 +4,7 @@ All notable changes to ChatGPT Desktop Access for NVDA, formerly Codex Access
 Toolkit and Codex Status Announcer, are recorded here. The active release line
 follows stable NVDA.
 
-## Unreleased
+## 2026.3.0
 
 - Fixed Control+1 through Control+0 for recent messages when ChatGPT uses a
   different interface language. The add-on identifies user and assistant
@@ -16,6 +16,11 @@ follows stable NVDA.
   duration or the current thinking state.
 - Outside ChatGPT, progress updates are sound-only and stop if the native timer
   stops updating. Tasks without an exposed timer do not produce recurring cues.
+- Added Spanish, German, and Brazilian Portuguese translations. They are
+  machine translations, marked as such in each catalog, and corrections from
+  native speakers are welcome. Support reports stay in English so they can be
+  read when shared.
+- Tested with NVDA 2026.3, which starts the add-on's 2026.3 version line.
 
 ### What to test
 

@@ -73,15 +73,16 @@ from .soundOutput import (
 addonHandler.initTranslation()
 
 CONFIG_SECTION = "codexStatusAnnouncer"
-ADDON_VERSION = "2026.2.20"
+ADDON_VERSION = "2026.3.0"
 CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage"
 DEFAULT_SUPPORTED_APP_NAMES = "chatgpt,codex"
 APP_MODULE_ALIASES = (("codex", "chatgpt"),)
 CURRENT_RELEASE_NOTES = _(
-	"Version 2026.2.20\n\n"
+	"Version 2026.3.0\n\n"
 	"What's new:\n"
-	"• The Working sound now stops after a short Codex or ChatGPT turn, instead of playing until the ChatGPT window is closed.\n"
-	"• French translation of the add-on's settings, commands, and announcements, contributed by Nitram1123."
+	"• Working sounds and progress updates follow ChatGPT's own task timer. A new command, Read the native task timer, can be assigned in Input Gestures.\n"
+	"• NVDA+Shift+C reads the current chat title, and NVDA announces the title when you switch chats.\n"
+	"• Control+1 through Control+0 read recent messages in any ChatGPT interface language."
 )
 VERBOSITY_CHOICES = ("minimal", "full")
 FULL_SPEECH_PROFILE_CHOICES = ("standard", "developer", "raw")

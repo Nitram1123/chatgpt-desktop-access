@@ -48,7 +48,7 @@ def audit(projectRoot, packagePath, version):
 	assert re.search(r"(?m)^url = https://.+$", manifest), "manifest HTTPS homepage missing"
 	assert re.search(r"(?m)^docFileName = readme\.md$", manifest), "manifest documentation field missing"
 	assert re.search(r"(?m)^minimumNVDAVersion = 2023\.1\.0$", manifest), "minimum stable NVDA compatibility mismatch"
-	assert re.search(r"(?m)^lastTestedNVDAVersion = 2026\.2\.0$", manifest), "tested stable NVDA compatibility mismatch"
+	assert re.search(r"(?m)^lastTestedNVDAVersion = 2026\.3\.0$", manifest), "tested stable NVDA compatibility mismatch"
 	assert re.search(r"(?m)^updateChannel = None$", manifest), "stable package update channel mismatch"
 	assert f'[string]$Version = "{version}"' in build, "build default version mismatch"
 	assert f"## {version}" in changelog, "changelog version heading missing"
