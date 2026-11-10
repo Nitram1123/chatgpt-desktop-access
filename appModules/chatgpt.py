@@ -1,18 +1,52 @@
 """Application-scoped commands for the ChatGPT desktop app."""
 
 from collections import deque
+from dataclasses import dataclass
 
 import addonHandler
 import api
 import appModuleHandler
 import core
 import ui
-from controlTypes import Role
+import winUser
+from controlTypes import Role, State
+from keyboardHandler import KeyboardInputGesture
 from logHandler import log
+from NVDAObjects import NVDAObject
 from scriptHandler import getLastScriptRepeatCount, script
 
 
 addonHandler.initTranslation()
+
+_SIDEBAR_LABELS = {
+	"Hide sidebar": True, "Masquer la barre latérale": True,
+	"Show sidebar": False, "Afficher la barre latérale": False,
+}
+_SIDEBAR_LANDMARKS = {"Accueil", "Home"}
+_ACTIVITY_OPEN_LABELS = {
+	"View activity", "View activity, needs attention",
+	"Afficher l’activité", "Afficher l’activité, attention requise",
+}
+_ACTIVITY_CLOSE_LABELS = {
+	"Turn off activity view", "Fermer la vue d’activité", "Désactiver la vue Activité",
+}
+_PROJECTS_LABELS = {"Projets", "Projects"}
+_PROJECT_ACTION_PREFIXES = ("Actions du projet ", "Project actions for ")
+_RECENTS_LABELS = {"Récents", "Recents"}
+_RECENTS_OPTIONS_LABELS = {"Options de la barre latérale de Chat", "Chat sidebar options"}
+_SIDEBAR_CHECKS = 30
+
+
+@dataclass
+class _SidebarFocusRequest:
+	windowHandle: int
+	section: str
+	checksLeft: int = _SIDEBAR_CHECKS
+	activityFocused: bool = False
+	activityCloseRequested: bool = False
+	sidebarOpened: bool = False
+	headerFocused: bool = False
+	headerActivated: bool = False
 
 
 def _walkObjects(root, maxDepth):
@@ -34,6 +68,120 @@ def _getMainDocument(window):
 def _chatTitle(window):
 	document = _getMainDocument(window)
 	return (document.name or "").strip() if document is not None else ""
+
+
+def _getSidebar(document):
+	return next((obj for obj in _walkObjects(document, 6) if (
+		obj.role == Role.LANDMARK and obj.name in _SIDEBAR_LANDMARKS and State.INVISIBLE not in obj.states
+	)), None)
+
+
+def _getSidebarState(document):
+	for obj in _walkObjects(document, 5):
+		if obj.role == Role.BUTTON and obj.name in _SIDEBAR_LABELS:
+			return _SIDEBAR_LABELS[obj.name]
+	return None
+
+
+def _isActiveActivityButton(obj):
+	if obj.role not in (Role.BUTTON, Role.TOGGLEBUTTON):
+		return False
+	name = (obj.name or "").replace("'", "’")
+	if name not in _ACTIVITY_OPEN_LABELS and name not in _ACTIVITY_CLOSE_LABELS:
+		return False
+	states = obj.states
+	return State.INVISIBLE not in states and (
+		name in _ACTIVITY_CLOSE_LABELS or State.PRESSED in states or State.CHECKED in states
+	)
+
+
+def _getActiveActivityButton(root):
+	return next((obj for obj in _walkObjects(root, 6) if _isActiveActivityButton(obj)), None)
+
+
+def _getFirstProject(sidebar):
+	# Walk in sidebar order even if some project rows are nested more deeply.
+	objects = [sidebar]
+	while objects:
+		obj = objects.pop()
+		children = obj.children
+		if obj.role in (Role.BUTTON, Role.LINK) and any(
+			child.role == Role.BUTTON and (child.name or "").startswith(_PROJECT_ACTION_PREFIXES)
+			for child in children
+		):
+			return obj
+		objects.extend(reversed(children))
+	return None
+
+
+def _projectTarget(sidebar):
+	for obj in sidebar.children:
+		if obj.role == Role.BUTTON and obj.name in _PROJECTS_LABELS and State.COLLAPSED in obj.states:
+			return None, obj
+	return _getFirstProject(sidebar), None
+
+
+def _iterChatRows(items):
+	for item in items:
+		if item.role != Role.LISTITEM:
+			continue
+		for control in _walkObjects(item, 3):
+			if control.role in (Role.BUTTON, Role.LINK) and control.name:
+				yield item, control
+				break
+
+
+def _recentChatTarget(sidebar):
+	siblings = iter(sidebar.children)
+	header = next((obj for obj in siblings if obj.role == Role.BUTTON and obj.name in _RECENTS_LABELS), None)
+	if header is None:
+		return None, None
+	if State.COLLAPSED in header.states:
+		return None, header
+
+	# The list follows the header and its options button in the accessibility tree.
+	for content in siblings:
+		if content.role in (Role.GROUPING, Role.LIST):
+			break
+		if content.role == Role.BUTTON and content.name not in _RECENTS_OPTIONS_LABELS:
+			states = content.states
+			if State.HASPOPUP not in states and {State.COLLAPSED, State.EXPANDED} & states:
+				return None, None
+	else:
+		return None, None
+	chatList = next((obj for obj in _walkObjects(content, 2) if obj.role == Role.LIST), None)
+	if chatList is not None:
+		for _, control in _iterChatRows(chatList.children):
+			if not any((child.name or "").startswith(_PROJECT_ACTION_PREFIXES) for child in control.children):
+				return control, None
+	return None, None
+
+
+def _modifiersReleased():
+	return not any(
+		winUser.getAsyncKeyState(key) & 0x8000
+		for key in (winUser.VK_SHIFT, winUser.VK_CONTROL, winUser.VK_MENU)
+	)
+
+
+def _activateFocusedSidebarControl(control, windowHandle, *, activity=False):
+	if not _modifiersReleased():
+		return False
+	# Read the keyboard focus directly. The cached NVDA event can lag behind Chromium.
+	focused = NVDAObject.objectWithFocus()
+	focusWindow = getattr(focused, "windowHandle", 0)
+	if focused is None or not (
+		focusWindow == windowHandle or winUser.isDescendantWindow(windowHandle, focusWindow)
+	):
+		return False
+	# The activity toggle can expose a different role or label in the focus object.
+	matches = _isActiveActivityButton(focused) if activity else (
+		focused.role == control.role and focused.name == control.name and State.EXPANDED not in focused.states
+	)
+	if not matches:
+		return False
+	KeyboardInputGesture.fromName("enter").send()
+	return True
 
 
 def _activeToolkitPlugin():
@@ -69,6 +217,8 @@ class AppModule(appModuleHandler.AppModule):
 
 	def __init__(self, *args, **kwargs):
 		super().__init__(*args, **kwargs)
+		self._sidebarFocusRequest = None
+		self._sidebarFocusTimer = None
 		self._titleWatch = None
 		self._lastChatTitle = None
 		self._scheduleTitleWatch(0)
@@ -78,6 +228,7 @@ class AppModule(appModuleHandler.AppModule):
 			self._scheduleTitleWatch(0)
 
 	def event_appModule_loseFocus(self):
+		self._cancelSidebarFocus()
 		if self._titleWatch is not None:
 			self._titleWatch.Stop()
 			self._titleWatch = None
@@ -113,6 +264,94 @@ class AppModule(appModuleHandler.AppModule):
 			else:
 				ui.message(title)
 
+	def _cancelSidebarFocus(self):
+		self._sidebarFocusRequest = None
+		if self._sidebarFocusTimer is not None:
+			self._sidebarFocusTimer.Stop()
+			self._sidebarFocusTimer = None
+
+	def _focusSidebarSection(self, section):
+		foreground = api.getForegroundObject()
+		if foreground is None or foreground.processID != self.processID:
+			return
+		if self._sidebarFocusRequest is not None:
+			request = self._sidebarFocusRequest
+			if request.section == section and request.windowHandle == foreground.windowHandle:
+				return
+		self._cancelSidebarFocus()
+		request = self._sidebarFocusRequest = _SidebarFocusRequest(foreground.windowHandle, section)
+		self._continueSidebarFocus(request)
+
+	def _continueSidebarFocus(self, request):
+		if request is not self._sidebarFocusRequest:
+			return
+		self._sidebarFocusTimer = None
+		foreground = api.getForegroundObject()
+		if foreground is None or foreground.windowHandle != request.windowHandle or foreground.processID != self.processID:
+			self._cancelSidebarFocus()
+			return
+
+		header = None
+		try:
+			document = _getMainDocument(foreground)
+			sidebar = _getSidebar(document)
+			activityButton = _getActiveActivityButton(document)
+			if activityButton is not None:
+				if not request.activityFocused:
+					activityButton.setFocus()
+					request.activityFocused = True
+					request.checksLeft = _SIDEBAR_CHECKS
+				elif not request.activityCloseRequested and _activateFocusedSidebarControl(
+					activityButton, request.windowHandle, activity=True,
+				):
+					request.activityCloseRequested = True
+					request.checksLeft = _SIDEBAR_CHECKS
+			elif sidebar is None:
+				if not request.sidebarOpened and _getSidebarState(document) is False and _modifiersReleased():
+					request.sidebarOpened = True
+					KeyboardInputGesture.fromName("control+shift+s").send()
+			else:
+				target, header = self._sidebarTarget(sidebar, request.section)
+				if target is not None:
+					self._cancelSidebarFocus()
+					target.setFocus()
+					return
+				if header is not None and not request.headerFocused:
+					header.setFocus()
+					request.headerFocused = True
+					request.checksLeft = _SIDEBAR_CHECKS
+				elif header is not None and not request.headerActivated and _activateFocusedSidebarControl(
+					header, request.windowHandle,
+				):
+					request.headerActivated = True
+					request.checksLeft = _SIDEBAR_CHECKS
+		except (LookupError, NotImplementedError):
+			self._cancelSidebarFocus()
+			ui.message(_("Could not move focus in the sidebar"))
+			return
+
+		request.checksLeft -= 1
+		if request.checksLeft > 0:
+			self._sidebarFocusTimer = core.callLater(150, self._continueSidebarFocus, request)
+			return
+		self._cancelSidebarFocus()
+		if activityButton is not None:
+			ui.message(_("Could not move focus in the sidebar"))
+		elif sidebar is None:
+			ui.message(_("The sidebar is unavailable"))
+		elif header is not None:
+			ui.message(_("Could not expand {section}").format(section=header.name))
+		else:
+			ui.message(self._emptySidebarSectionMessage(request.section))
+
+	def _sidebarTarget(self, sidebar, section):
+		return _projectTarget(sidebar) if section == "projects" else _recentChatTarget(sidebar)
+
+	def _emptySidebarSectionMessage(self, section):
+		if section == "projects":
+			return _("No projects found in the sidebar")
+		return _("No chats found in Recents")
+
 	def _runToolkitCommand(self, methodName, *args):
 		plugin = _activeToolkitPlugin()
 		handler = getattr(plugin, methodName, None) if plugin is not None else None
@@ -128,6 +367,14 @@ class AppModule(appModuleHandler.AppModule):
 	@script(description=_("Announce the current chat title"))
 	def script_announceChatTitle(self, gesture):
 		ui.message(_chatTitle(api.getForegroundObject()) or _("The chat title is unavailable"))
+
+	@script(description=_("Move to the first project in the sidebar"))
+	def script_focusFirstProject(self, gesture):
+		self._focusSidebarSection("projects")
+
+	@script(description=_("Move to the first chat in Recents"))
+	def script_focusFirstRecentChat(self, gesture):
+		self._focusSidebarSection("recents")
 
 	@script(description=_("Read the most recent ChatGPT message"))
 	def script_readMostRecentChatMessage(self, gesture):

@@ -1722,3 +1722,24 @@ msgstr "Lire le compteur natif de la tâche"
 #: globalPlugins/codexStatusAnnouncer/__init__.py
 msgid "No active task timer"
 msgstr "Aucun compteur de tâche actif"
+
+msgid "Could not move focus in the sidebar"
+msgstr "Impossible de déplacer le focus dans la barre latérale"
+
+msgid "The sidebar is unavailable"
+msgstr "La barre latérale est indisponible"
+
+msgid "Could not expand {section}"
+msgstr "Impossible de déplier la section {section}"
+
+msgid "No projects found in the sidebar"
+msgstr "Aucun projet trouvé dans la barre latérale"
+
+msgid "Move to the first project in the sidebar"
+msgstr "Aller au premier projet de la barre latérale"
+
+msgid "No chats found in Recents"
+msgstr "Aucun chat trouvé dans la section Récents"
+
+msgid "Move to the first chat in Recents"
+msgstr "Aller au premier chat de la section Récents"
