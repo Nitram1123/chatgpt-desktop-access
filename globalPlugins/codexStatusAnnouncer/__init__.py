@@ -2166,9 +2166,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			return
 		speaker, text = messages[-position]
 		speakerLabel = _("You") if speaker == "user" else _("ChatGPT")
-		ui.message(_("Chat message {position}, {speaker}: {text}").format(
-			position=position, speaker=speakerLabel, text=text,
-		))
+		ui.message(_("{speaker}: {text}").format(speaker=speakerLabel, text=text))
 
 	def _splitScanConversationMessages(self, tailMessages):
 		"""Keep long-conversation caches current without discarding earlier turns."""

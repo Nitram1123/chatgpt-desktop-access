@@ -185,6 +185,8 @@ Control+1 through Control+0 review the ten most recent user or ChatGPT messages:
 - The sequence continues through Control+0, which reads the tenth-most-recent
   message.
 
+Review announces the author and message text directly, without a numbered prefix.
+
 Each position is a separately named action. These shortcuts work in both focus
 mode and browse mode. In forked and side conversations, review follows the
 conversation containing the focused message field. Each request refreshes a

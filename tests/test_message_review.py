@@ -1,4 +1,5 @@
 import ast
+import gettext
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -16,6 +17,39 @@ def loadMethod(name, namespace):
 
 
 class MessageReviewTests(unittest.TestCase):
+	def test_all_ten_positions_announce_only_the_author_and_text_in_english_and_french(self):
+		messages = tuple(
+			("user" if index % 2 else "assistant", f"Actual message text {index}")
+			for index in range(10)
+		)
+		for language, userLabel, assistantLabel, separator in (
+			("en", "You", "ChatGPT", ": "),
+			("fr", "Vous", "ChatGPT", " : "),
+			("fr_CA", "Vous", "ChatGPT", " : "),
+		):
+			with self.subTest(language=language):
+				spoken = []
+				translate = gettext.translation(
+					"nvda", PLUGIN_PATH.parents[2] / "locale", languages=[language], fallback=language == "en",
+				).gettext
+				method = loadMethod("_readRecentChatMessage", {"_": translate, "ui": SimpleNamespace(message=spoken.append)})
+				subject = SimpleNamespace(_currentChatMessages=lambda: messages)
+				for position in range(1, 11):
+					method(subject, position)
+				self.assertEqual([
+					(userLabel if speaker == "user" else assistantLabel) + separator + text
+					for speaker, text in reversed(messages)
+				], spoken)
+
+	def test_empty_or_short_conversations_keep_their_explanatory_messages(self):
+		spoken = []
+		method = loadMethod("_readRecentChatMessage", {"_": lambda text: text, "ui": SimpleNamespace(message=spoken.append)})
+		method(SimpleNamespace(_currentChatMessages=lambda: ()), 1)
+		method(SimpleNamespace(_currentChatMessages=lambda: (("assistant", "Only response"),)), 2)
+		self.assertEqual([
+			"No recent chat messages are available", "Only 1 recent chat messages are available",
+		], spoken)
+
 	def test_focused_composer_precedes_a_valid_remembered_composer_in_another_pane(self):
 		remembered = SimpleNamespace(isPrompt=True)
 		focused = SimpleNamespace(isPrompt=True)

@@ -263,9 +263,9 @@ msgstr "O histórico de chats já está sendo aberto"
 msgid "Chat history is not available in the current view"
 msgstr "O histórico de chats não está disponível na exibição atual"
 
-#: globalPlugins/codexStatusAnnouncer/__init__.py:2136
-msgid "Chat message {position}, {speaker}: {text}"
-msgstr "Mensagem do chat {position}, {speaker}: {text}"
+#: globalPlugins/codexStatusAnnouncer/__init__.py:2169
+msgid "{speaker}: {text}"
+msgstr "{speaker}: {text}"
 
 #: globalPlugins/codexStatusAnnouncer/__init__.py:4487
 msgid "Chat opened: {title}"

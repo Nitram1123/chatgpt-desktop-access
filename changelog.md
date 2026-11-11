@@ -6,6 +6,8 @@ follows stable NVDA.
 
 ## Unreleased
 
+- Removed the numbered prefix from Control+1 through Control+0 announcements.
+  Review reads the author and message text directly.
 - Fixed Control+1 through Control+0 reading an old message or a message from
   another conversation pane. Review now reads the focused composer's conversation
   on demand and stops at that conversation's boundary.
