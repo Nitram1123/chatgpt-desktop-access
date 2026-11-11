@@ -73,6 +73,21 @@ def _walkObjects(root, maxDepth):
 
 
 def _getMainDocument(window):
+	# NVDA already knows the outer document containing the focus. Use that
+	# ancestry before making cross-process calls to walk the window's tree.
+	try:
+		focus = api.getFocusObject()
+		if (
+			focus is not None and window is not None
+			and focus.processID == window.processID
+			and winUser.getAncestor(focus.windowHandle, winUser.GA_ROOT) == window.windowHandle
+		):
+			for obj in (*api.getFocusAncestors(), focus):
+				if obj.role == Role.DOCUMENT:
+					return obj
+	except Exception:
+		# Focus ancestors can disappear while Chromium replaces the document.
+		pass
 	# Start at the outer window, so a browser pane cannot supply its own title.
 	return next((obj for obj in _walkObjects(window, 10) if obj.role == Role.DOCUMENT), None)
 
@@ -305,19 +320,20 @@ class AppModule(appModuleHandler.AppModule):
 	def _scheduleTitleWatch(self, delay):
 		def check():
 			if self._titleWatch is pending:
+				self._titleWatch = None
 				self._checkChatTitle()
 
 		pending = self._titleWatch = core.callLater(delay, check)
 
-	def _checkChatTitle(self):
-		self._titleWatch = None
+	def _checkChatTitle(self, checkArchive=True):
 		window = api.getForegroundObject()
 		if window is None or window.processID != self.processID:
 			self._chatArchiveRequest = None
 			self._lastChatTitle = None
 			return
-		self._scheduleTitleWatch(500)
-		if self._chatArchiveRequest is not None:
+		if self._titleWatch is None:
+			self._scheduleTitleWatch(500)
+		if checkArchive and self._chatArchiveRequest is not None:
 			self._continueChatArchive(window)
 		title = _chatTitle(window)
 		if not title:

@@ -32,6 +32,7 @@ from gui import guiHelper
 from gui.settingsDialogs import NVDASettingsDialog, SettingsPanel
 from logHandler import log
 from scriptHandler import script
+from speech.extensions import filter_speechSequence
 
 from .browserAccess import (
 	embeddedBrowserProgress, embeddedBrowserTitle, isEmbeddedBrowserContainerRole,
@@ -74,6 +75,9 @@ addonHandler.initTranslation()
 
 CONFIG_SECTION = "codexStatusAnnouncer"
 ADDON_VERSION = "2026.3.0"
+CHAT_TITLE_RETRY_DELAY_MS = 100
+CHAT_TITLE_SWITCH_QUIET_SECONDS = 1.5
+CHAT_TITLE_FOCUS_QUIET_SECONDS = 0.8
 CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage"
 DEFAULT_SUPPORTED_APP_NAMES = "chatgpt,codex"
 APP_MODULE_ALIASES = (("codex", "chatgpt"),)
@@ -1625,6 +1629,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._embeddedBrowserProgressBuckets = {}
 		self._pendingOpenedChatTitle = ""
 		self._lastChatOpened = None
+		self._pendingTitleAnnouncement = None
+		self._chatTitleTimer = None
+		self._chatTitleSpeechQuietUntil = 0.0
+		self._chatTitleSpeechWindowHandle = 0
+		filter_speechSequence.register(self._filterChatTitleSpeech)
 		self._pendingOpenedChatAt = 0.0
 		self._chatHistoryCaches = {"chatgpt": (), "codex": ()}
 		self._ambiguousRecentChatTitles = {"chatgpt": set(), "codex": set()}
@@ -1663,6 +1672,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._whatsNewTimer = wx.CallLater(1500, self._showWhatsNewIfNeeded)
 
 	def terminate(self):
+		filter_speechSequence.unregister(self._filterChatTitleSpeech)
+		if self._chatTitleTimer is not None:
+			self._chatTitleTimer.Stop()
+			self._chatTitleTimer = None
+		self._pendingTitleAnnouncement = None
+		self._chatTitleSpeechQuietUntil = 0.0
 		global _activePluginInstance
 		self._nativeTimerObserver.detach()
 		self._clearNativeTaskTimer()
@@ -4482,9 +4497,22 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._chatHistoryActionTimer = None
 		self._performChatHistoryAction(title, action, source, mode)
 
+	def _chatTitleSpeechEnabled(self):
+		conf = _settings()
+		return not self._paused and not _speechIsOff() and categoryOutputActions(
+			conf["outputOther"], conf["speech"], conf["braille"], conf["soundWhenSpeechUnavailable"],
+		)["speech"]
+
+	def _filterChatTitleSpeech(self, speechSequence):
+		if time.monotonic() < self._chatTitleSpeechQuietUntil:
+			window = api.getForegroundObject()
+			if window is not None and window.windowHandle == self._chatTitleSpeechWindowHandle:
+				return []
+		return speechSequence
+
 	def _announceChatOpened(self, title, windowHandle):
 		# History and the document watcher can report the same chat switch.
-		message = _("Chat opened: {title}").format(title=title) if title else _("New chat opened")
+		message = title if title else _("New chat opened")
 		self._latestMessage = self._latestFullMessage = message
 		now = time.monotonic()
 		key = windowHandle, " ".join(title.casefold().split())
@@ -4492,7 +4520,57 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if title and previous is not None and previous[0] == key and now - previous[1] < 2.0:
 			return
 		self._lastChatOpened = key, now
-		self._speakOnce(message, "other", "other", brailleMessage=message)
+		if self._chatTitleTimer is not None:
+			self._chatTitleTimer.Stop()
+		window = api.getForegroundObject()
+		if window is None or window.windowHandle != windowHandle:
+			self._chatTitleTimer = None
+			self._pendingTitleAnnouncement = None
+			return
+		self._pendingTitleAnnouncement = message, windowHandle
+		self._chatTitleSpeechWindowHandle = windowHandle
+		if self._chatTitleSpeechEnabled():
+			self._chatTitleSpeechQuietUntil = now + CHAT_TITLE_SWITCH_QUIET_SECONDS
+			speech.cancelSpeech()
+		# Let NVDA finish the current focus event before announcing the title.
+		self._chatTitleTimer = wx.CallLater(0, self._speakChatTitle, message, windowHandle)
+
+	def _flushChatTitleAfterFocus(self):
+		pending = self._pendingTitleAnnouncement
+		if pending is not None and self._chatTitleTimer is not None:
+			self._chatTitleTimer.Stop()
+			self._speakChatTitle(*pending)
+
+	def _speakChatTitle(self, message, windowHandle):
+		self._chatTitleTimer = None
+		window = api.getForegroundObject()
+		if window is None or window.windowHandle != windowHandle:
+			self._pendingTitleAnnouncement = None
+			self._chatTitleSpeechQuietUntil = 0.0
+			return
+		buffer = getattr(api.getFocusObject(), "treeInterceptor", None)
+		if not getattr(buffer, "isReady", True) and time.monotonic() < self._chatTitleSpeechQuietUntil:
+			self._chatTitleTimer = wx.CallLater(CHAT_TITLE_RETRY_DELAY_MS, self._speakChatTitle, message, windowHandle)
+			return
+		self._pendingTitleAnnouncement = None
+		self._chatTitleSpeechQuietUntil = 0.0
+		try:
+			if self._chatTitleSpeechEnabled():
+				speech.cancelSpeech()
+			self._speakOnce(message, "other", "other", priority="urgent", brailleMessage=message)
+		finally:
+			if self._chatTitleSpeechEnabled():
+				self._chatTitleSpeechQuietUntil = time.monotonic() + CHAT_TITLE_FOCUS_QUIET_SECONDS
+
+	def _checkChatTitleBeforeFocus(self, obj):
+		try:
+			if not _isChatGPTObject(obj):
+				return
+			check = getattr(getattr(obj, "appModule", None), "_checkChatTitle", None)
+			if check is not None:
+				check(checkArchive=False)
+		except Exception:
+			log.debugWarning("ChatGPT Desktop Access could not check the chat title before focus speech", exc_info=True)
 
 	def _rememberBuffer(self, obj, allowUnclassifiedConversation=False):
 		if not _isChatGPTObject(obj):
@@ -5639,6 +5717,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def _observeInputGesture(self, gesture):
 		"""Observe prompt input and defer large scans during conversation navigation."""
+		self._chatTitleSpeechQuietUntil = 0.0
 		try:
 			identifiers = getattr(gesture, "identifiers", ()) or ()
 			if isinstance(identifiers, str):
@@ -5691,6 +5770,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def _observePromptGestureIdentifiers(self, identifiers):
 		"""Process immutable gesture identifiers only on NVDA's main queue."""
 		try:
+			pendingTitle = getattr(self, "_chatTitleTimer", None)
+			if pendingTitle is not None:
+				pendingTitle.Stop()
+				self._chatTitleTimer = None
+				self._pendingTitleAnnouncement = None
 			if not self._appFocusState or getattr(self, "_timer", True) is None:
 				return True
 			# Conversation state is owned by NVDA's main thread.
@@ -6875,9 +6959,23 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		except Exception:
 			log.debugWarning("ChatGPT Desktop Access could not follow a typed suggestion character", exc_info=True)
 
-	def event_gainFocus(self, obj, nextHandler):
-		nextHandler()
+	def event_focusEntered(self, obj, nextHandler):
 		try:
+			self._checkChatTitleBeforeFocus(obj)
+		except Exception:
+			log.debugWarning("ChatGPT Desktop Access title focus handling failed", exc_info=True)
+		finally:
+			nextHandler()
+
+	def event_gainFocus(self, obj, nextHandler):
+		try:
+			self._checkChatTitleBeforeFocus(obj)
+		except Exception:
+			log.debugWarning("ChatGPT Desktop Access title focus handling failed", exc_info=True)
+		finally:
+			nextHandler()
+		try:
+			self._flushChatTitleAfterFocus()
 			if _isChatGPTObject(obj):
 				self._rememberConversationWindowFromEvent(obj)
 			else:
@@ -6934,7 +7032,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			log.debugWarning("ChatGPT Desktop Access foreground-event handling failed", exc_info=True)
 
 	def event_nameChange(self, obj, nextHandler):
-		nextHandler()
+		try:
+			if _isChatGPTObject(obj) and getattr(obj, "role", None) == Role.DOCUMENT:
+				self._checkChatTitleBeforeFocus(obj)
+		except Exception:
+			log.debugWarning("ChatGPT Desktop Access title name handling failed", exc_info=True)
+		finally:
+			nextHandler()
 		if not _isChatGPTObject(obj):
 			return
 		try:
@@ -7103,7 +7207,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			log.debugWarning("ChatGPT Desktop Access hide-event handling failed", exc_info=True)
 
 	def event_alert(self, obj, nextHandler):
-		nextHandler()
+		try:
+			if _isChatGPTObject(obj):
+				self._chatTitleSpeechQuietUntil = 0.0
+		except Exception:
+			log.debugWarning("ChatGPT Desktop Access title alert handling failed", exc_info=True)
+		finally:
+			nextHandler()
 		if not _isChatGPTObject(obj):
 			return
 		try:
