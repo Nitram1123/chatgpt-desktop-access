@@ -187,8 +187,9 @@ Control+1 through Control+0 review the ten most recent user or ChatGPT messages:
 
 Each position is a separately named action. These shortcuts work in both focus
 mode and browse mode. In forked and side conversations, review follows the
-currently visible branch. The add-on maintains a small active-branch cache so a
-review command does not rescan the entire Chromium accessibility tree.
+conversation containing the focused message field. Each request refreshes a
+bounded range of that conversation, so new messages are available immediately
+and adjacent conversation panes are kept separate.
 
 For a native list instead of the conversation web view, assign **Open the
 current conversation's messages in a native list** under NVDA Input Gestures,

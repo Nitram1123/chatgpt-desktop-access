@@ -6,6 +6,9 @@ follows stable NVDA.
 
 ## Unreleased
 
+- Fixed Control+1 through Control+0 reading an old message or a message from
+  another conversation pane. Review now reads the focused composer's conversation
+  on demand and stops at that conversation's boundary.
 - Announce only the chat title when switching conversations, interrupting the
   previous speech and briefly suppressing native focus speech during navigation.
   Focus events and document-name changes check the title immediately, with the
@@ -15,6 +18,11 @@ follows stable NVDA.
 
 ### What to test
 
+- With a main chat and a parallel discussion open, focus each message field
+  and use Control+1 and Control+2. Check that each reads its own newest messages.
+  Repeat after a new message arrives and in both focus and browse modes.
+- In a short side conversation, ask for more messages than it contains. Check
+  that the command reports the available count instead of reading another pane.
 - Switch between conversations using the sidebar, chat history, and native
   shortcuts. Check that only the new title is read, once, in focus and browse mode.
 - Switch again before a title is announced and check that only the latest title

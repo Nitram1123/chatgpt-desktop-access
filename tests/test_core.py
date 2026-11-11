@@ -4248,10 +4248,12 @@ class StatusMessageTests(unittest.TestCase):
 				turnCount = 4 if self.scanCharacters <= 32768 else 12
 				for index in range(20 - turnCount, 20):
 					yield "You said:" if index % 2 == 0 else "ChatGPT said:"
-					yield "message {index}".format(index=index)
+					yield "message {index}".format(index=index + buffer.turnOffset)
 
 		class Buffer:
-			def __init__(self): self.positions = []
+			def __init__(self):
+				self.positions = []
+				self.turnOffset = 0
 			def makeTextInfo(self, position):
 				self.positions.append(position)
 				return Info()
@@ -4291,15 +4293,23 @@ class StatusMessageTests(unittest.TestCase):
 		for name in methodNames:
 			setattr(Subject, name, namespace[name])
 		subject = Subject()
+		subject._recentChatMessages = (("assistant", "Stale main-pane response"),) * 10
+		subject._recentChatMessagesBuffer = buffer
 		messages = namespace["_currentChatMessages"](subject)
 		self.assertEqual([True], subject.explicitAttachments)
 		self.assertEqual([prompt, prompt], buffer.positions)
 		self.assertEqual(10, len(messages))
 		self.assertEqual(("user", "message 10"), messages[0])
 		self.assertEqual(("assistant", "message 19"), messages[-1])
-		# The second shortcut is cache-only: no Chromium fields are traversed again.
-		self.assertEqual(messages, namespace["_currentChatMessages"](subject))
-		self.assertEqual([prompt, prompt], buffer.positions)
+		# A new turn in the same buffer must be read immediately, even when the
+		# background cache still contains ten turns from the other pane.
+		buffer.turnOffset = 1
+		subject._conversationMessages = tuple(("assistant", f"Earlier turn {i}") for i in range(100))
+		messageListSnapshot = subject._conversationMessages
+		updated = namespace["_currentChatMessages"](subject)
+		self.assertEqual(("assistant", "message 20"), updated[-1])
+		self.assertEqual([prompt, prompt, prompt, prompt], buffer.positions)
+		self.assertEqual(messageListSnapshot, subject._conversationMessages)
 
 	def test_conversation_message_list_keeps_100_turns_without_changing_shortcuts(self):
 		pluginTree = ast.parse(PLUGIN_PATH.read_text(encoding="utf-8"))

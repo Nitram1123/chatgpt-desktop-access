@@ -1932,17 +1932,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		return accumulator.messages(), collector.promptReached
 
 	def _currentChatMessages(self):
-		"""Return the cached active-branch turns, scanning once only before a cache exists."""
+		"""Read the active branch on demand; a shared-buffer cache may describe another pane."""
 		focus = api.getFocusObject()
 		if not _isChatGPTObject(focus):
 			return ()
 		self._rememberBuffer(focus, allowUnclassifiedConversation=True)
 		if not self._buffer:
 			return ()
-		if self._recentChatMessagesBuffer is self._buffer and len(self._recentChatMessages) >= 10:
-			return self._recentChatMessages
-		self._cacheRecentChatMessages(self._activeBranchMessages(10))
-		return self._recentChatMessages
+		return self._activeBranchMessages(10)
 
 	def _readNativeTaskTimer(self, includeThinking=False):
 		buffer = self._buffer
@@ -2114,6 +2111,21 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			anchor = self._findChatGPTPromptObject()
 		except Exception:
 			pass
+		branchStart = None
+		if anchor is not None:
+			try:
+				container = anchor.parent
+				for _depth in range(12):
+					if container is None or container.role == Role.DOCUMENT:
+						break
+					if "thread-scroll-container" in _domClassNames(container).split():
+						branchStart = self._buffer.makeTextInfo(container)
+						branchStart.collapse()
+						break
+					container = container.parent
+			except Exception:
+				# Older app builds may not expose a conversation container.
+				branchStart = None
 		scanCharacters = RECENT_CHAT_INITIAL_SCAN_CHARACTERS
 		while True:
 			if anchor is not None:
@@ -2125,10 +2137,16 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			if anchor is None:
 				info = self._buffer.makeTextInfo(textInfos.POSITION_LAST)
 			moved = _extendScanStart(info, scanCharacters)
+			reachedStart = abs(moved) < scanCharacters
+			if branchStart is not None and anchor is not None:
+				# Adjacent conversations can share a Chromium document. Do not scan
+				# beyond the current thread's start when it has fewer than ten turns.
+				if info.compareEndPoints(branchStart, "startToStart") <= 0:
+					info.setEndPoint(branchStart, "startToStart")
+					reachedStart = True
 			messages, _promptReached = self._chatMessagesFromInfo(
 				info, stopAtPrompt=anchor is None, limit=limit,
 			)
-			reachedStart = abs(moved) < scanCharacters
 			if len(messages) >= limit or reachedStart or scanCharacters >= RECENT_CHAT_MAX_SCAN_CHARACTERS:
 				return messages
 			scanCharacters = min(scanCharacters * 2, RECENT_CHAT_MAX_SCAN_CHARACTERS)
@@ -4354,11 +4372,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		return False
 
 	def _findChatGPTPromptObject(self):
-		candidates = [self._lastPromptObject, self._pendingPromptObject]
+		candidates = []
 		try:
 			candidates.append(api.getFocusObject())
 		except Exception:
 			pass
+		candidates.extend((self._lastPromptObject, self._pendingPromptObject))
 		for candidate in tuple(candidates):
 			current = candidate
 			for _ in range(8):
