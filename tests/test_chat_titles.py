@@ -44,6 +44,7 @@ class ChatTitleTests(unittest.TestCase):
 				"_announceChatOpened", "_speakChatTitle", "_chatTitleSpeechEnabled",
 				"_filterChatTitleSpeech", "_checkChatTitleBeforeFocus", "event_focusEntered",
 				"_observeInputGesture", "_observePromptGestureIdentifiers", "event_alert",
+				"_flushChatTitleAfterFocus", "event_gainFocus",
 			)
 		]
 		self.settings = {"outputOther": "speech", "speech": True, "braille": True, "soundWhenSpeechUnavailable": False}
@@ -51,7 +52,7 @@ class ChatTitleTests(unittest.TestCase):
 		pluginNamespace = {
 			"_": translate, "time": SimpleNamespace(monotonic=lambda: self.now),
 			"api": self.api, "wx": SimpleNamespace(CallLater=ScheduledCall),
-			"CHAT_TITLE_FOCUS_DELAY_MS": 100,
+			"CHAT_TITLE_RETRY_DELAY_MS": 100,
 			"CHAT_TITLE_SWITCH_QUIET_SECONDS": 1.5, "CHAT_TITLE_FOCUS_QUIET_SECONDS": 0.8,
 			"speech": SimpleNamespace(cancelSpeech=lambda: self.cancellations.append(self.now)),
 			"_settings": lambda: self.settings, "_speechIsOff": lambda: False,
@@ -66,6 +67,7 @@ class ChatTitleTests(unittest.TestCase):
 		class Announcer:
 			_lastChatOpened = None
 			_chatTitleTimer = None
+			_pendingTitleAnnouncement = None
 			_chatTitleSpeechQuietUntil = 0.0
 			_chatTitleSpeechWindowHandle = 0
 			_paused = False
@@ -97,10 +99,35 @@ class ChatTitleTests(unittest.TestCase):
 			"_activeToolkitPlugin": lambda: plugin,
 		}
 		exec(compile(ast.Module(body=nodes, type_ignores=[]), str(APP_PATH), "exec"), appNamespace)
+		self.appNamespace = appNamespace
 		watcher = appNamespace["AppModule"](processID=self.window.processID)
 		watcher._titleWatch.callback()
 		self.assertEqual([], self.messages)
 		return watcher, plugin
+
+	def test_focus_ancestry_returns_the_outer_document_without_walking_the_tree(self):
+		self._startWatcher("en")
+		self.focus = SimpleNamespace(processID=7, windowHandle=12, role="edit")
+		browser = SimpleNamespace(role="document", name="Embedded browser")
+		self.api.getFocusAncestors = lambda: (self.window, self.document, browser)
+		self.appNamespace["winUser"] = SimpleNamespace(GA_ROOT=2, getAncestor=lambda handle, flag: 11)
+		class UnexpectedTraversal:
+			def __iter__(self):
+				raise AssertionError("The window tree should not be traversed")
+		self.window.children = UnexpectedTraversal()
+		self.assertIs(self.document, self.appNamespace["_getMainDocument"](self.window))
+
+	def test_focus_in_another_window_or_process_uses_the_requested_window_tree(self):
+		self._startWatcher("en")
+		for processID, rootHandle in ((7, 22), (8, 11)):
+			with self.subTest(processID=processID, rootHandle=rootHandle):
+				self.focus = SimpleNamespace(processID=processID, windowHandle=12, role="edit")
+				foreign = SimpleNamespace(role="document", name="Other window")
+				self.api.getFocusAncestors = lambda: (foreign,)
+				self.appNamespace["winUser"] = SimpleNamespace(
+					GA_ROOT=2, getAncestor=lambda handle, flag: rootHandle,
+				)
+				self.assertIs(self.document, self.appNamespace["_getMainDocument"](self.window))
 
 	def test_only_the_title_is_announced_once_in_each_language(self):
 		for language in ("en", "fr_CA"):
@@ -131,12 +158,28 @@ class ChatTitleTests(unittest.TestCase):
 		plugin.event_focusEntered(obj, lambda: nativeSpeech.extend(plugin._filterChatTitleSpeech(["Prompt edit"])))
 		self.assertEqual([], nativeSpeech)
 		self.assertEqual([10.0], self.cancellations)
-		self.assertEqual(100, plugin._chatTitleTimer.delay)
+		self.assertEqual(0, plugin._chatTitleTimer.delay)
 		plugin._chatTitleTimer.callback()
 		self.assertEqual([("Second chat", "Second chat")], self.messages)
 		self.assertEqual([], plugin._filterChatTitleSpeech(["Conversation region"]))
 		self.now += 0.81
 		self.assertEqual(["Prompt edit"], plugin._filterChatTitleSpeech(["Prompt edit"]))
+
+	def test_title_is_read_after_native_focus_handling_without_waiting_for_a_timer(self):
+		watcher, plugin = self._startWatcher("en")
+		self.window.children = [SimpleNamespace(role="document", name="Second chat", children=[])]
+		obj = SimpleNamespace(processID=self.window.processID, appModule=watcher)
+		plugin.event_focusEntered(obj, lambda: None)
+		pending = plugin._chatTitleTimer
+		def nativeFocus():
+			self.cancellations.append("native focus cancellation")
+			self.assertEqual([], self.messages)
+		plugin.event_gainFocus(obj, nativeFocus)
+		self.assertTrue(pending.stopped)
+		self.assertIsNone(plugin._chatTitleTimer)
+		self.assertIsNone(plugin._pendingTitleAnnouncement)
+		self.assertEqual([("Second chat", "Second chat")], self.messages)
+		self.assertEqual("native focus cancellation", self.cancellations[-2])
 
 	def test_background_application_is_neither_muted_nor_given_a_stale_title(self):
 		_, plugin = self._startWatcher("en")

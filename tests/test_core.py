@@ -831,6 +831,7 @@ class StatusMessageTests(unittest.TestCase):
 				self.polls = 0
 				self.modeConfirmations = 0
 				self._attachmentMenuActiveAt = 0.0
+			def _flushChatTitleAfterFocus(self): pass
 			def _rememberConversationWindowFromEvent(self, obj): return True
 			def _updateAppFocusState(self, obj): return None
 			def _rememberEmbeddedBrowserObject(self, obj): return False
@@ -2960,7 +2961,7 @@ class StatusMessageTests(unittest.TestCase):
 			"_isNativeCommonDialogObject": lambda obj: bool(getattr(obj, "nativeDialog", False)),
 			"api": Api, "pendingChatTitle": pendingChatTitle,
 			"wx": type("Wx", (), {"CallLater": staticmethod(lambda delay, callback, *args: callback(*args))}),
-			"CHAT_TITLE_FOCUS_DELAY_MS": 100,
+			"CHAT_TITLE_RETRY_DELAY_MS": 100,
 			"conversationModeFromSwitchLabel": conversationModeFromSwitchLabel,
 			"_switchControlMode": lambda obj: "",
 			"_isConversationObject": lambda obj: not bool(getattr(obj, "embeddedBrowser", False)),

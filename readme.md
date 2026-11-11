@@ -169,8 +169,10 @@ unassigned action can be given a gesture if wanted.
 ### Chat titles
 
 NVDA+Shift+C reads the current chat title. When you switch chats, the add-on
-interrupts the previous speech and announces only the new title. Native focus
-speech is briefly suppressed during the transition so it does not cover the
+interrupts the previous speech and announces only the new title. It reads the
+outer document from NVDA's focus ancestry when available, and announces after
+native focus handling completes. Native focus speech is briefly suppressed
+throughout the transition so it does not cover the
 title. Keyboard input ends that suppression, and speech in other apps is
 unaffected. Announcement pause and output settings continue to apply.
 

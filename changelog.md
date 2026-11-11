@@ -9,7 +9,9 @@ follows stable NVDA.
 - Announce only the chat title when switching conversations, interrupting the
   previous speech and briefly suppressing native focus speech during navigation.
   Focus events and document-name changes check the title immediately, with the
-  existing document watcher retained as a fallback.
+  existing document watcher retained as a fallback. The title lookup uses
+  NVDA's focus ancestry when it belongs to the requested window, and pending
+  titles are read as soon as native focus handling finishes, without a fixed delay.
 
 ### What to test
 

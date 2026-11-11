@@ -73,6 +73,21 @@ def _walkObjects(root, maxDepth):
 
 
 def _getMainDocument(window):
+	# NVDA already knows the outer document containing the focus. Use that
+	# ancestry before making cross-process calls to walk the window's tree.
+	try:
+		focus = api.getFocusObject()
+		if (
+			focus is not None and window is not None
+			and focus.processID == window.processID
+			and winUser.getAncestor(focus.windowHandle, winUser.GA_ROOT) == window.windowHandle
+		):
+			for obj in (*api.getFocusAncestors(), focus):
+				if obj.role == Role.DOCUMENT:
+					return obj
+	except Exception:
+		# Focus ancestors can disappear while Chromium replaces the document.
+		pass
 	# Start at the outer window, so a browser pane cannot supply its own title.
 	return next((obj for obj in _walkObjects(window, 10) if obj.role == Role.DOCUMENT), None)
 

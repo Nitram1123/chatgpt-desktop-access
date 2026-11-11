@@ -75,7 +75,7 @@ addonHandler.initTranslation()
 
 CONFIG_SECTION = "codexStatusAnnouncer"
 ADDON_VERSION = "2026.3.0"
-CHAT_TITLE_FOCUS_DELAY_MS = 100
+CHAT_TITLE_RETRY_DELAY_MS = 100
 CHAT_TITLE_SWITCH_QUIET_SECONDS = 1.5
 CHAT_TITLE_FOCUS_QUIET_SECONDS = 0.8
 CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage"
@@ -1629,6 +1629,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._embeddedBrowserProgressBuckets = {}
 		self._pendingOpenedChatTitle = ""
 		self._lastChatOpened = None
+		self._pendingTitleAnnouncement = None
 		self._chatTitleTimer = None
 		self._chatTitleSpeechQuietUntil = 0.0
 		self._chatTitleSpeechWindowHandle = 0
@@ -1675,6 +1676,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		if self._chatTitleTimer is not None:
 			self._chatTitleTimer.Stop()
 			self._chatTitleTimer = None
+		self._pendingTitleAnnouncement = None
 		self._chatTitleSpeechQuietUntil = 0.0
 		global _activePluginInstance
 		self._nativeTimerObserver.detach()
@@ -4523,24 +4525,34 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		window = api.getForegroundObject()
 		if window is None or window.windowHandle != windowHandle:
 			self._chatTitleTimer = None
+			self._pendingTitleAnnouncement = None
 			return
+		self._pendingTitleAnnouncement = message, windowHandle
 		self._chatTitleSpeechWindowHandle = windowHandle
 		if self._chatTitleSpeechEnabled():
 			self._chatTitleSpeechQuietUntil = now + CHAT_TITLE_SWITCH_QUIET_SECONDS
 			speech.cancelSpeech()
 		# Let NVDA finish the current focus event before announcing the title.
-		self._chatTitleTimer = wx.CallLater(CHAT_TITLE_FOCUS_DELAY_MS, self._speakChatTitle, message, windowHandle)
+		self._chatTitleTimer = wx.CallLater(0, self._speakChatTitle, message, windowHandle)
+
+	def _flushChatTitleAfterFocus(self):
+		pending = self._pendingTitleAnnouncement
+		if pending is not None and self._chatTitleTimer is not None:
+			self._chatTitleTimer.Stop()
+			self._speakChatTitle(*pending)
 
 	def _speakChatTitle(self, message, windowHandle):
 		self._chatTitleTimer = None
 		window = api.getForegroundObject()
 		if window is None or window.windowHandle != windowHandle:
+			self._pendingTitleAnnouncement = None
 			self._chatTitleSpeechQuietUntil = 0.0
 			return
 		buffer = getattr(api.getFocusObject(), "treeInterceptor", None)
 		if not getattr(buffer, "isReady", True) and time.monotonic() < self._chatTitleSpeechQuietUntil:
-			self._chatTitleTimer = wx.CallLater(CHAT_TITLE_FOCUS_DELAY_MS, self._speakChatTitle, message, windowHandle)
+			self._chatTitleTimer = wx.CallLater(CHAT_TITLE_RETRY_DELAY_MS, self._speakChatTitle, message, windowHandle)
 			return
+		self._pendingTitleAnnouncement = None
 		self._chatTitleSpeechQuietUntil = 0.0
 		try:
 			if self._chatTitleSpeechEnabled():
@@ -5762,6 +5774,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			if pendingTitle is not None:
 				pendingTitle.Stop()
 				self._chatTitleTimer = None
+				self._pendingTitleAnnouncement = None
 			if not self._appFocusState or getattr(self, "_timer", True) is None:
 				return True
 			# Conversation state is owned by NVDA's main thread.
@@ -6962,6 +6975,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		finally:
 			nextHandler()
 		try:
+			self._flushChatTitleAfterFocus()
 			if _isChatGPTObject(obj):
 				self._rememberConversationWindowFromEvent(obj)
 			else:
