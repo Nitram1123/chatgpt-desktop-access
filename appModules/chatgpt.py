@@ -305,19 +305,20 @@ class AppModule(appModuleHandler.AppModule):
 	def _scheduleTitleWatch(self, delay):
 		def check():
 			if self._titleWatch is pending:
+				self._titleWatch = None
 				self._checkChatTitle()
 
 		pending = self._titleWatch = core.callLater(delay, check)
 
-	def _checkChatTitle(self):
-		self._titleWatch = None
+	def _checkChatTitle(self, checkArchive=True):
 		window = api.getForegroundObject()
 		if window is None or window.processID != self.processID:
 			self._chatArchiveRequest = None
 			self._lastChatTitle = None
 			return
-		self._scheduleTitleWatch(500)
-		if self._chatArchiveRequest is not None:
+		if self._titleWatch is None:
+			self._scheduleTitleWatch(500)
+		if checkArchive and self._chatArchiveRequest is not None:
 			self._continueChatArchive(window)
 		title = _chatTitle(window)
 		if not title:

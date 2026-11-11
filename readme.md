@@ -166,6 +166,14 @@ All add-on actions appear under **NVDA > Preferences > Input Gestures > ChatGPT
 Desktop Access**. A default gesture can be changed or removed there, and an
 unassigned action can be given a gesture if wanted.
 
+### Chat titles
+
+NVDA+Shift+C reads the current chat title. When you switch chats, the add-on
+interrupts the previous speech and announces only the new title. Native focus
+speech is briefly suppressed during the transition so it does not cover the
+title. Keyboard input ends that suppression, and speech in other apps is
+unaffected. Announcement pause and output settings continue to apply.
+
 ### Recent-message review
 
 Control+1 through Control+0 review the ten most recent user or ChatGPT messages:

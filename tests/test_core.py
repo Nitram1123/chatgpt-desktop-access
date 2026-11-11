@@ -778,9 +778,9 @@ class StatusMessageTests(unittest.TestCase):
 		]
 		self.assertGreaterEqual(len(eventMethods), 7)
 		for method in eventMethods:
-			if method.name == "event_caret":
-				# This hook must run before NVDA's object-level caret handler, which
-				# would otherwise flush the first cell of the next contracted word.
+			if method.name in ("event_caret", "event_focusEntered", "event_gainFocus", "event_nameChange", "event_alert"):
+				# Caret composition and chat-title transitions need to run before
+				# native speech, while still forwarding every event after a failure.
 				tryNode = next(node for node in method.body if isinstance(node, ast.Try))
 				self.assertTrue(tryNode.finalbody, method.name)
 				self.assertTrue(any(
@@ -2882,7 +2882,7 @@ class StatusMessageTests(unittest.TestCase):
 		methods = [
 			node for node in pluginClass.body
 			if isinstance(node, ast.FunctionDef) and node.name in (
-				"_setConversationMode", "_rememberBuffer", "_announceChatOpened",
+				"_setConversationMode", "_rememberBuffer", "_announceChatOpened", "_speakChatTitle",
 			)
 		]
 		method = next(node for node in methods if node.name == "_rememberBuffer")
@@ -2901,6 +2901,8 @@ class StatusMessageTests(unittest.TestCase):
 			def __init__(self, text): self.text = text
 			def makeTextInfo(self, position): return TextInfo(self.text)
 		class Api:
+			@staticmethod
+			def getForegroundObject(): return type("Window", (), {"windowHandle": 1234})()
 			focus = type("Focus", (), {"inChatGPT": True})()
 			@classmethod
 			def getFocusObject(cls): return cls.focus
@@ -2925,6 +2927,8 @@ class StatusMessageTests(unittest.TestCase):
 				self._pendingOpenedChatTitle = ""
 				self._pendingOpenedChatAt = 0.0
 				self._lastChatOpened = None
+				self._chatTitleTimer = None
+				self._chatTitleSpeechQuietUntil = 0.0
 				self._documentSwitchCount = 2
 				self._monitoringAnnounced = True
 				self._latestMessage = self._latestFullMessage = "Running command"
@@ -2944,6 +2948,9 @@ class StatusMessageTests(unittest.TestCase):
 				return namespace["_setConversationMode"](self, mode, reason, authoritative)
 			def _announceChatOpened(self, title, windowHandle):
 				namespace["_announceChatOpened"](self, title, windowHandle)
+			def _chatTitleSpeechEnabled(self): return False
+			def _speakChatTitle(self, message, windowHandle):
+				namespace["_speakChatTitle"](self, message, windowHandle)
 			def _resetTaskState(self, reason): self.resets.append(reason)
 			def _bindNativeTaskTimer(self, buffer): pass
 			def _cancelChatHistoryExpansion(self): pass
@@ -2952,6 +2959,8 @@ class StatusMessageTests(unittest.TestCase):
 			"_isChatGPTObject": lambda obj: bool(getattr(obj, "inChatGPT", True)),
 			"_isNativeCommonDialogObject": lambda obj: bool(getattr(obj, "nativeDialog", False)),
 			"api": Api, "pendingChatTitle": pendingChatTitle,
+			"wx": type("Wx", (), {"CallLater": staticmethod(lambda delay, callback, *args: callback(*args))}),
+			"CHAT_TITLE_FOCUS_DELAY_MS": 100,
 			"conversationModeFromSwitchLabel": conversationModeFromSwitchLabel,
 			"_switchControlMode": lambda obj: "",
 			"_isConversationObject": lambda obj: not bool(getattr(obj, "embeddedBrowser", False)),
@@ -2996,7 +3005,7 @@ class StatusMessageTests(unittest.TestCase):
 		subject._announceChatOpened("Project discussion", 1234)
 		subject._announceChatOpened("Other chat", 1234)
 		self.assertEqual([
-			"New chat opened", "Chat opened: Project discussion", "Chat opened: Other chat",
+			"New chat opened", "Project discussion", "Other chat",
 		], subject.spoken)
 		longBuffer = Buffer("Main landmark Do anything " + ("response body " * 900))
 		longSubject = Subject(refreshedBuffer)

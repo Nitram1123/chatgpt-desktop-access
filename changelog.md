@@ -4,6 +4,24 @@ All notable changes to ChatGPT Desktop Access for NVDA, formerly Codex Access
 Toolkit and Codex Status Announcer, are recorded here. The active release line
 follows stable NVDA.
 
+## Unreleased
+
+- Announce only the chat title when switching conversations, interrupting the
+  previous speech and briefly suppressing native focus speech during navigation.
+  Focus events and document-name changes check the title immediately, with the
+  existing document watcher retained as a fallback.
+
+### What to test
+
+- Switch between conversations using the sidebar, chat history, and native
+  shortcuts. Check that only the new title is read, once, in focus and browse mode.
+- Switch again before a title is announced and check that only the latest title
+  is read. Use NVDA+Shift+C immediately afterward to repeat it.
+- Start navigating or typing immediately after switching. Check that ordinary
+  speech resumes. Switch to another app and check that its speech is unaffected.
+- Pause announcements or disable speech output and check that the add-on does
+  not silence native focus speech. Reload NVDA plugins and repeat a chat switch.
+
 ## 2026.3.0
 
 - Added two assignable NVDA commands to move focus to the first project or
