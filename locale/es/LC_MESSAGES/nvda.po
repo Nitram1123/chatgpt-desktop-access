@@ -1674,3 +1674,9 @@ msgstr "{recent} resultados recientes; {archived} resultados archivados"
 #: globalPlugins/codexStatusAnnouncer/messageListDialog.py:71
 msgid "{shown} of {total} cached messages shown; older messages remain in ChatGPT's conversation view"
 msgstr "Se muestran {shown} de {total} mensajes en caché; los más antiguos siguen en la vista de la conversación de ChatGPT"
+
+msgid "Sidebar shown"
+msgstr "Barra lateral visible"
+
+msgid "Sidebar hidden"
+msgstr "Barra lateral oculta"

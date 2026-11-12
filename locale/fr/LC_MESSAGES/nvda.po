@@ -1761,3 +1761,9 @@ msgstr "Chat archivé. Impossible de replacer le focus dans la liste"
 
 msgid "Could not confirm that the chat was archived"
 msgstr "Impossible de confirmer l’archivage du chat"
+
+msgid "Sidebar shown"
+msgstr "Barre latérale affichée"
+
+msgid "Sidebar hidden"
+msgstr "Barre latérale masquée"

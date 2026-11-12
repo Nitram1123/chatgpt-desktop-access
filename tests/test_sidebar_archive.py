@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).parents[1]
 PLUGIN_PATH = ROOT / "globalPlugins" / "codexStatusAnnouncer" / "__init__.py"
-Role = Enum("Role", "DOCUMENT LANDMARK LIST LISTITEM LINK BUTTON EDITABLETEXT")
+Role = Enum("Role", "MENUBUTTON DOCUMENT LANDMARK LIST LISTITEM LINK BUTTON EDITABLETEXT")
 State = Enum("State", "FOCUSED INVISIBLE")
 
 
@@ -65,6 +65,7 @@ class SidebarArchiveTests(unittest.TestCase):
 			"api": SimpleNamespace(getForegroundObject=lambda: self.window, getFocusObject=lambda: self.focus),
 			"appModuleHandler": SimpleNamespace(AppModule=SimpleNamespace),
 			"browseMode": SimpleNamespace(BrowseModeDocumentTreeInterceptor=BrowseMode),
+			"comtypes": SimpleNamespace(COMError=type("COMError", (Exception,), {})),
 			"controlTypes": SimpleNamespace(Role=Role, State=State),
 			"keyboardHandler": SimpleNamespace(KeyboardInputGesture=SimpleNamespace(fromName=lambda key: None)),
 			"winUser": SimpleNamespace(VK_SHIFT=1, VK_CONTROL=2, VK_MENU=3, getAsyncKeyState=lambda key: 0),

@@ -2,6 +2,21 @@
 
 Complete this checklist with the packaged add-on before publishing a release.
 
+## Recent-message review and conversation focus
+
+- Open main and parallel conversations. Keep keyboard focus in one composer,
+  navigate in the other with browse mode, and use Control+1 through Control+0.
+  Check the selected conversation and message order without activating the
+  latest-response heading. In focus mode, verify that its composer takes precedence.
+- Scroll up in a long chat with an unsent draft. Review must load the end of that
+  conversation without sending or changing the draft. Repeat shortcuts quickly,
+  and change chats/panes/apps while content is loading to check cancellation.
+- Leave the mascot visible. A background Electron surface must not replace
+  NVDA's focus. Activate a real second window and open an owned approval or native
+  file dialog to confirm that legitimate focus and speech remain accessible.
+- Test project and Recents navigation in normal, full and Activity views, with
+  the sidebar open/closed and sections expanded/collapsed, using French and English.
+
 ## Installation and startup
 
 - Install the package and restart NVDA when prompted.

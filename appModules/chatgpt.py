@@ -10,6 +10,7 @@ import core
 import ui
 import winUser
 from browseMode import BrowseModeDocumentTreeInterceptor
+from comtypes import COMError
 from controlTypes import Role, State
 from keyboardHandler import KeyboardInputGesture
 from logHandler import log
@@ -24,6 +25,7 @@ _SIDEBAR_LABELS = {
 	"Show sidebar": False, "Afficher la barre latérale": False,
 }
 _SIDEBAR_LANDMARKS = {"Accueil", "Home"}
+_FULL_VIEW_EXIT_LABELS = {"Exit full view", "Quitter la vue complète"}
 _ACTIVITY_OPEN_LABELS = {
 	"View activity", "View activity, needs attention",
 	"Afficher l’activité", "Afficher l’activité, attention requise",
@@ -43,9 +45,11 @@ class _SidebarFocusRequest:
 	windowHandle: int
 	section: str
 	checksLeft: int = _SIDEBAR_CHECKS
+	fullViewExitRequested: bool = False
 	activityFocused: bool = False
 	activityCloseRequested: bool = False
-	sidebarOpened: bool = False
+	sidebarToggleFocused: bool = False
+	sidebarOpenRequested: bool = False
 	headerFocused: bool = False
 	headerActivated: bool = False
 
@@ -61,7 +65,7 @@ class _ChatArchiveRequest:
 	checksLeft: int = 12
 
 
-def _walkObjects(root, maxDepth):
+def _walkObjects(root, maxDepth, *, skipLists=False):
 	if root is None:
 		return
 	objects = deque([(root, 0)])
@@ -69,27 +73,21 @@ def _walkObjects(root, maxDepth):
 		obj, depth = objects.popleft()
 		yield obj
 		if depth < maxDepth:
-			objects.extend((child, depth + 1) for child in obj.children)
+			try:
+				if skipLists and obj.role == Role.LIST:
+					continue
+				objects.extend((child, depth + 1) for child in obj.children)
+			except COMError:
+				# Chromium can replace a subtree while NVDA is walking it.
+				continue
 
 
 def _getMainDocument(window):
-	# NVDA already knows the outer document containing the focus. Use that
-	# ancestry before making cross-process calls to walk the window's tree.
-	try:
-		focus = api.getFocusObject()
-		if (
-			focus is not None and window is not None
-			and focus.processID == window.processID
-			and winUser.getAncestor(focus.windowHandle, winUser.GA_ROOT) == window.windowHandle
-		):
-			for obj in (*api.getFocusAncestors(), focus):
-				if obj.role == Role.DOCUMENT:
-					return obj
-	except Exception:
-		# Focus ancestors can disappear while Chromium replaces the document.
-		pass
-	# Start at the outer window, so a browser pane cannot supply its own title.
-	return next((obj for obj in _walkObjects(window, 10) if obj.role == Role.DOCUMENT), None)
+	# Focus ancestors may describe another Chromium document in the same window
+	# (for example, the mascot or an embedded pane). Alternating between that
+	# document and the main one would falsely report a chat switch on every update.
+	# Always resolve the outer document from the requested window instead.
+	return _findObject(window, 10, lambda obj: obj.role == Role.DOCUMENT)
 
 
 def _chatTitle(window):
@@ -98,16 +96,27 @@ def _chatTitle(window):
 
 
 def _getSidebar(document):
-	return next((obj for obj in _walkObjects(document, 6) if (
-		obj.role == Role.LANDMARK and obj.name in _SIDEBAR_LANDMARKS and State.INVISIBLE not in obj.states
-	)), None)
+	def isSidebar(obj):
+		return obj.role == Role.LANDMARK and obj.name in _SIDEBAR_LANDMARKS and State.INVISIBLE not in obj.states
+
+	# Keep the fast path for older/pruned accessibility trees.
+	sidebar = _findObject(document, 6, isSidebar, skipLists=True)
+	if sidebar is not None:
+		return sidebar
+	# IA2 retains layout containers that UI Automation omits. Search the shell's
+	# left panel first, so deeper layouts do not require walking conversations.
+	panel = _findObject(document, 8, lambda obj: (
+		"app-shell-left-panel" in str((getattr(obj, "IA2Attributes", None) or {}).get("class", "")).split()
+		and State.INVISIBLE not in obj.states
+	), skipLists=True)
+	# Full view can remove the entire panel. Do not scan message transcripts
+	# while waiting for the shell to restore it.
+	return _findObject(panel, 20, isSidebar, skipLists=True) if panel is not None else None
 
 
 def _getSidebarState(document):
-	for obj in _walkObjects(document, 5):
-		if obj.role == Role.BUTTON and obj.name in _SIDEBAR_LABELS:
-			return _SIDEBAR_LABELS[obj.name]
-	return None
+	toggle = _getSidebarToggle(document)
+	return _sidebarToggleState(toggle) if toggle is not None else None
 
 
 def _isActiveActivityButton(obj):
@@ -122,29 +131,48 @@ def _isActiveActivityButton(obj):
 	)
 
 
-def _getActiveActivityButton(root):
-	return next((obj for obj in _walkObjects(root, 6) if _isActiveActivityButton(obj)), None)
+def _getActiveActivityButton(root, *, sidebar=False):
+	if sidebar:
+		for obj in _sidebarObjects(root, skipLists=True):
+			if _isActiveActivityButton(obj):
+				return obj
+			if obj.role == Role.BUTTON and obj.name in _PROJECTS_LABELS | _RECENTS_LABELS:
+				break
+		return None
+	return _findObject(root, 6, _isActiveActivityButton, skipLists=True)
 
 
 def _getFirstProject(sidebar):
 	# Walk in sidebar order even if some project rows are nested more deeply.
-	objects = [sidebar]
-	while objects:
-		obj = objects.pop()
-		children = obj.children
-		if obj.role in (Role.BUTTON, Role.LINK) and any(
-			child.role == Role.BUTTON and (child.name or "").startswith(_PROJECT_ACTION_PREFIXES)
-			for child in children
+	for obj in _sidebarObjects(sidebar):
+		if obj.role == Role.BUTTON and obj.name in _RECENTS_LABELS:
+			break
+		if obj.role not in (Role.BUTTON, Role.LINK):
+			continue
+		classes = str((getattr(obj, "IA2Attributes", None) or {}).get("class", "")).split()
+		if "sidebar-item" in classes and "group/folder-row" in classes:
+			return obj
+		# Older/pruned trees expose the actions directly; IA2 may retain wrappers
+		# and expose a menu button instead of a plain button.
+		if any(
+			child.role in (Role.BUTTON, Role.MENUBUTTON)
+			and (child.name or "").startswith(_PROJECT_ACTION_PREFIXES)
+			for child in _walkObjects(obj, 3) if child is not obj
 		):
 			return obj
-		objects.extend(reversed(children))
 	return None
 
 
 def _projectTarget(sidebar):
-	for obj in sidebar.children:
-		if obj.role == Role.BUTTON and obj.name in _PROJECTS_LABELS and State.COLLAPSED in obj.states:
-			return None, obj
+	for obj in _sidebarObjects(sidebar, skipLists=True):
+		if obj.role != Role.BUTTON:
+			continue
+		if obj.name in _PROJECTS_LABELS:
+			if State.COLLAPSED in obj.states:
+				return None, obj
+			break
+		if obj.name in _RECENTS_LABELS:
+			return None, None
 	return _getFirstProject(sidebar), None
 
 
@@ -191,7 +219,7 @@ def _modifiersReleased():
 	)
 
 
-def _activateFocusedSidebarControl(control, windowHandle, *, activity=False):
+def _activateFocusedSidebarControl(control, windowHandle, *, activity=False, sidebarToggle=False):
 	if not _modifiersReleased():
 		return False
 	# Read the keyboard focus directly. The cached NVDA event can lag behind Chromium.
@@ -202,9 +230,12 @@ def _activateFocusedSidebarControl(control, windowHandle, *, activity=False):
 	):
 		return False
 	# The activity toggle can expose a different role or label in the focus object.
-	matches = _isActiveActivityButton(focused) if activity else (
-		focused.role == control.role and focused.name == control.name and State.EXPANDED not in focused.states
-	)
+	if activity:
+		matches = _isActiveActivityButton(focused)
+	elif sidebarToggle:
+		matches = _sidebarToggleState(focused) is False
+	else:
+		matches = focused.role == control.role and focused.name == control.name and State.EXPANDED not in focused.states
 	if not matches:
 		return False
 	KeyboardInputGesture.fromName("enter").send()
@@ -258,8 +289,101 @@ def _chatListFallback(sidebar, chatList):
 		if parent.role == Role.LISTITEM:
 			return _getFirstProject(parent)
 		parent = parent.parent
-	return next((child for child in sidebar.children if child.role == Role.BUTTON and child.name in _RECENTS_LABELS), None)
+	return next((child for child in _sidebarObjects(sidebar, skipLists=True) if child.role == Role.BUTTON and child.name in _RECENTS_LABELS), None)
 
+
+def _findObject(root, maxDepth, matches, *, skipLists=False):
+	for obj in _walkObjects(root, maxDepth, skipLists=skipLists):
+		try:
+			if matches(obj):
+				return obj
+		except COMError:
+			continue
+	return None
+
+def _getSidebarDocument(window):
+	"""Use NVDA's current focus ancestry if the foreground tree omits Chromium."""
+	document = _getMainDocument(window)
+	if document is not None:
+		return document
+	focus = api.getFocusObject()
+	focusWindow = getattr(focus, "windowHandle", 0)
+	if focusWindow != window.windowHandle and not (
+		focusWindow and winUser.isDescendantWindow(window.windowHandle, focusWindow)
+	):
+		return None
+	for obj in (*api.getFocusAncestors(), focus):
+		try:
+			if obj is not None and obj.role == Role.DOCUMENT:
+				return obj
+		except COMError:
+			continue
+	return None
+
+def _getSidebarToggle(document):
+	return _findObject(document, 5, lambda obj: (
+		_sidebarToggleState(obj) is not None and State.INVISIBLE not in obj.states
+	))
+
+def _sidebarToggleState(obj):
+	if obj.role != Role.BUTTON:
+		return None
+	attrs = getattr(obj, "IA2Attributes", None) or {}
+	if "group/sidebar-trigger" in str(attrs.get("class", "")).split():
+		states = obj.states
+		if State.EXPANDED in states:
+			return True
+		if State.COLLAPSED in states:
+			return False
+	return _SIDEBAR_LABELS.get(obj.name)
+
+def _isFullViewExitButton(obj):
+	return (
+		obj.role in (Role.BUTTON, Role.TOGGLEBUTTON)
+		and obj.name in _FULL_VIEW_EXIT_LABELS
+		and State.INVISIBLE not in obj.states
+	)
+
+def _getFullViewExitButton(root, foreground):
+	button = _findObject(root, 6, _isFullViewExitButton)
+	if button is None and root is not foreground:
+		button = _findObject(foreground, 12, _isFullViewExitButton)
+	return button
+
+def _sidebarObjects(sidebar, *, skipLists=False):
+	"""Yield sidebar controls in document order, retaining nested IA2 sections."""
+	objects = [sidebar] if sidebar is not None else []
+	while objects:
+		obj = objects.pop()
+		try:
+			# Validate a node before yielding it; Chromium may have removed it.
+			obj.role
+			yield obj
+			if not (skipLists and obj.role == Role.LIST):
+				objects.extend(reversed(obj.children))
+		except COMError:
+			continue
+
+def _recentChatList(sidebar, *, requireList=True):
+	siblings = _sidebarObjects(sidebar, skipLists=True)
+	header = next((obj for obj in siblings if obj.role == Role.BUTTON and obj.name in _RECENTS_LABELS), None)
+	if header is None:
+		return None, None
+	if State.COLLAPSED in header.states:
+		return None, header
+	if not requireList:
+		return None, None
+
+	# Layout wrappers differ between IA2 and UIA. Preserve document order while
+	# finding the first list after the section heading, regardless of wrappers.
+	for content in siblings:
+		if content.role == Role.LIST:
+			return content, None
+		if content.role == Role.BUTTON and content.name not in _RECENTS_OPTIONS_LABELS:
+			states = content.states
+			if State.HASPOPUP not in states and {State.COLLAPSED, State.EXPANDED} & states:
+				break
+	return None, None
 
 def _activeToolkitPlugin():
 	"""Return the running toolkit instance without creating another global plugin."""
@@ -299,6 +423,7 @@ class AppModule(appModuleHandler.AppModule):
 		self._chatArchiveRequest = None
 		self._titleWatch = None
 		self._lastChatTitle = None
+		self._lastSidebarState = None
 		self._scheduleTitleWatch(0)
 
 	def event_appModule_gainFocus(self):
@@ -312,6 +437,7 @@ class AppModule(appModuleHandler.AppModule):
 			self._titleWatch.Stop()
 			self._titleWatch = None
 		self._lastChatTitle = None
+		self._lastSidebarState = None
 
 	def terminate(self):
 		self.event_appModule_loseFocus()
@@ -330,12 +456,16 @@ class AppModule(appModuleHandler.AppModule):
 		if window is None or window.processID != self.processID:
 			self._chatArchiveRequest = None
 			self._lastChatTitle = None
+			self._lastSidebarState = None
 			return
 		if self._titleWatch is None:
 			self._scheduleTitleWatch(500)
+		document = _getMainDocument(window)
+		if checkArchive:
+			self._announceSidebarChange(document, window.windowHandle)
 		if checkArchive and self._chatArchiveRequest is not None:
 			self._continueChatArchive(window)
-		title = _chatTitle(window)
+		title = (document.name or "").strip() if document is not None else ""
 		if not title:
 			return
 		current = window.windowHandle, title
@@ -346,6 +476,14 @@ class AppModule(appModuleHandler.AppModule):
 				plugin._announceChatOpened(title, window.windowHandle)
 			else:
 				ui.message(title)
+
+	def _announceSidebarChange(self, document, windowHandle):
+		expanded = _getSidebarState(document)
+		if expanded is None:
+			return
+		previous, self._lastSidebarState = self._lastSidebarState, (windowHandle, expanded)
+		if previous == (windowHandle, not expanded):
+			ui.message(_("Sidebar shown") if expanded else _("Sidebar hidden"))
 
 	def _cancelSidebarFocus(self):
 		self._sidebarFocusRequest = None
@@ -365,6 +503,23 @@ class AppModule(appModuleHandler.AppModule):
 		request = self._sidebarFocusRequest = _SidebarFocusRequest(foreground.windowHandle, section)
 		self._continueSidebarFocus(request)
 
+	def _prepareSidebarSection(self, section):
+		foreground = api.getForegroundObject()
+		if foreground is None or foreground.processID != self.processID:
+			return
+		if self._sidebarFocusRequest is not None:
+			request = self._sidebarFocusRequest
+			if (
+				request.section == section
+				and request.windowHandle == foreground.windowHandle
+			):
+				return
+		self._cancelSidebarFocus()
+		request = self._sidebarFocusRequest = _SidebarFocusRequest(
+			foreground.windowHandle, section,
+		)
+		self._continueSidebarFocus(request)
+
 	def _continueSidebarFocus(self, request):
 		if request is not self._sidebarFocusRequest:
 			return
@@ -375,11 +530,22 @@ class AppModule(appModuleHandler.AppModule):
 			return
 
 		header = None
+		document = fullViewButton = activityButton = sidebar = None
 		try:
-			document = _getMainDocument(foreground)
-			sidebar = _getSidebar(document)
-			activityButton = _getActiveActivityButton(document)
-			if activityButton is not None:
+			document = _getSidebarDocument(foreground)
+			root = document if document is not None else foreground
+			sidebar = _getSidebar(root)
+
+			if sidebar is None and not request.sidebarOpenRequested:
+				fullViewButton = _getFullViewExitButton(root, foreground)
+			if fullViewButton is None:
+				if sidebar is not None:
+					activityButton = _getActiveActivityButton(sidebar, sidebar=True)
+				if activityButton is None:
+					activityButton = _getActiveActivityButton(root)
+			if fullViewButton is not None:
+				self._requestFullViewExit(fullViewButton, request)
+			elif activityButton is not None:
 				if not request.activityFocused:
 					activityButton.setFocus()
 					request.activityFocused = True
@@ -390,11 +556,9 @@ class AppModule(appModuleHandler.AppModule):
 					request.activityCloseRequested = True
 					request.checksLeft = _SIDEBAR_CHECKS
 			elif sidebar is None:
-				if not request.sidebarOpened and _getSidebarState(document) is False and _modifiersReleased():
-					request.sidebarOpened = True
-					KeyboardInputGesture.fromName("control+shift+s").send()
+				self._requestSidebarOpen(root, request)
 			else:
-				target, header = self._sidebarTarget(sidebar, request.section)
+				target, header = self._sidebarTarget(sidebar, request)
 				if target is not None:
 					self._cancelSidebarFocus()
 					target.setFocus()
@@ -408,27 +572,88 @@ class AppModule(appModuleHandler.AppModule):
 				):
 					request.headerActivated = True
 					request.checksLeft = _SIDEBAR_CHECKS
+		except COMError:
+			# Reacquire the document on the next check if it changed mid-request.
+			pass
 		except (LookupError, NotImplementedError):
-			self._cancelSidebarFocus()
-			ui.message(_("Could not move focus in the sidebar"))
+			self._failSidebarFocus(request, _("Could not move focus in the sidebar"))
 			return
 
 		request.checksLeft -= 1
 		if request.checksLeft > 0:
 			self._sidebarFocusTimer = core.callLater(150, self._continueSidebarFocus, request)
 			return
-		self._cancelSidebarFocus()
-		if activityButton is not None:
-			ui.message(_("Could not move focus in the sidebar"))
+		if fullViewButton is not None or activityButton is not None:
+			message = _("Could not move focus in the sidebar")
 		elif sidebar is None:
-			ui.message(_("The sidebar is unavailable"))
+			log.info(
+				"ChatGPT Desktop Access sidebar unavailable (document found=%s, toggle focused=%s, open requested=%s)",
+				document is not None, request.sidebarToggleFocused, request.sidebarOpenRequested,
+			)
+			message = _("The sidebar is unavailable")
 		elif header is not None:
-			ui.message(_("Could not expand {section}").format(section=header.name))
+			message = _("Could not expand {section}").format(section=header.name)
 		else:
-			ui.message(self._emptySidebarSectionMessage(request.section))
+			message = self._emptySidebarSectionMessage(request.section)
+		self._failSidebarFocus(request, message)
 
-	def _sidebarTarget(self, sidebar, section):
-		return _projectTarget(sidebar) if section == "projects" else _recentChatTarget(sidebar)
+	def _requestFullViewExit(self, button, request):
+		"""Leave full view before sending any command to open the sidebar."""
+		if request.fullViewExitRequested or not _modifiersReleased():
+			return
+		if winUser.getForegroundWindow() != request.windowHandle:
+			return
+		try:
+			button.doAction()
+		except NotImplementedError:
+			KeyboardInputGesture.fromName("control+shift+f").send()
+		request.fullViewExitRequested = True
+		request.checksLeft = _SIDEBAR_CHECKS
+
+	def _requestSidebarOpen(self, root, request):
+		"""Activate the native show button once, after it receives keyboard focus."""
+		if request.sidebarOpenRequested or not _modifiersReleased():
+			return
+		toggle = _getSidebarToggle(root)
+		if toggle is not None:
+			try:
+				if _sidebarToggleState(toggle) is not False:
+					return
+				if not request.sidebarToggleFocused:
+					toggle.setFocus()
+					request.sidebarToggleFocused = True
+					request.checksLeft = _SIDEBAR_CHECKS
+					return
+				if _activateFocusedSidebarControl(toggle, request.windowHandle, sidebarToggle=True):
+					request.sidebarOpenRequested = True
+					request.checksLeft = _SIDEBAR_CHECKS
+					return
+				if request.checksLeft > _SIDEBAR_CHECKS - 5:
+					return
+			except (COMError, LookupError, NotImplementedError):
+				pass
+		# Use the app's primary native sidebar shortcut when the button is unavailable.
+		if winUser.getForegroundWindow() != request.windowHandle:
+			return
+		KeyboardInputGesture.fromName("control+shift+s").send()
+		request.sidebarOpenRequested = True
+		request.checksLeft = _SIDEBAR_CHECKS
+		log.info("ChatGPT Desktop Access requested sidebar opening with Ctrl+Shift+S")
+
+	def _failSidebarFocus(self, request, message):
+		self._cancelSidebarFocus()
+		ui.message(message)
+
+	def _sidebarTarget(self, sidebar, request):
+		if request.section == "projects":
+			return _projectTarget(sidebar)
+		chatList, header = _recentChatList(sidebar)
+		if chatList is None:
+			return chatList, header
+		for _, control in _iterChatRows(chatList.children):
+			if not any((child.name or "").startswith(_PROJECT_ACTION_PREFIXES) for child in control.children):
+				return control, None
+		return None, None
 
 	def _emptySidebarSectionMessage(self, section):
 		if section == "projects":
@@ -453,11 +678,11 @@ class AppModule(appModuleHandler.AppModule):
 
 	@script(description=_("Move to the first project in the sidebar"))
 	def script_focusFirstProject(self, gesture):
-		self._focusSidebarSection("projects")
+		self._prepareSidebarSection("projects")
 
 	@script(description=_("Move to the first chat in Recents"))
 	def script_focusFirstRecentChat(self, gesture):
-		self._focusSidebarSection("recents")
+		self._prepareSidebarSection("recents")
 
 	@script(description=_("Archive the focused sidebar chat and move to the next chat"))
 	def script_archiveSidebarChat(self, gesture):

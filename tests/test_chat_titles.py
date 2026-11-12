@@ -59,6 +59,7 @@ class ChatTitleTests(unittest.TestCase):
 			"categoryOutputActions": lambda mode, speech, braille, sounds: {"speech": speech and mode == "speech"},
 			"_isChatGPTObject": lambda obj: getattr(obj, "processID", None) == self.window.processID,
 			"log": SimpleNamespace(debugWarning=lambda *args, **kwargs: None),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), pluginNamespace)
 
@@ -90,7 +91,7 @@ class ChatTitleTests(unittest.TestCase):
 		appNamespace = {
 			"_": translate,
 			"deque": deque,
-			"Role": SimpleNamespace(DOCUMENT="document"),
+			"Role": SimpleNamespace(DOCUMENT="document", BUTTON="button"),
 			"api": self.api,
 			"appModuleHandler": SimpleNamespace(AppModule=SimpleNamespace),
 			"core": SimpleNamespace(callLater=ScheduledCall),
@@ -105,17 +106,36 @@ class ChatTitleTests(unittest.TestCase):
 		self.assertEqual([], self.messages)
 		return watcher, plugin
 
-	def test_focus_ancestry_returns_the_outer_document_without_walking_the_tree(self):
+	def test_main_document_is_selected_from_the_window_not_a_secondary_focus_document(self):
 		self._startWatcher("en")
 		self.focus = SimpleNamespace(processID=7, windowHandle=12, role="edit")
-		browser = SimpleNamespace(role="document", name="Embedded browser")
-		self.api.getFocusAncestors = lambda: (self.window, self.document, browser)
+		secondary = SimpleNamespace(role="document", name="ChatGPT", children=[])
+		self.api.getFocusAncestors = lambda: (self.window, secondary, self.focus)
 		self.appNamespace["winUser"] = SimpleNamespace(GA_ROOT=2, getAncestor=lambda handle, flag: 11)
-		class UnexpectedTraversal:
-			def __iter__(self):
-				raise AssertionError("The window tree should not be traversed")
-		self.window.children = UnexpectedTraversal()
 		self.assertIs(self.document, self.appNamespace["_getMainDocument"](self.window))
+
+	def test_secondary_focus_documents_never_interrupt_the_current_chat(self):
+		watcher, plugin = self._startWatcher("en")
+		self.focus = SimpleNamespace(processID=7, windowHandle=12, role="graphic", appModule=watcher)
+		self.appNamespace["winUser"] = SimpleNamespace(GA_ROOT=2, getAncestor=lambda handle, flag: 11)
+		for name in ("ChatGPT", "Mascotte Codex", "First chat", "ChatGPT"):
+			with self.subTest(document=name):
+				secondary = SimpleNamespace(role="document", name=name, children=[])
+				self.api.getFocusAncestors = lambda: (self.window, secondary, self.focus)
+				self.now += 3.0
+				plugin.event_focusEntered(self.focus, lambda: None)
+				watcher._titleWatch.callback()
+				self.assertIsNone(plugin._chatTitleTimer)
+				self.assertEqual([], self.cancellations)
+				self.assertEqual([], self.messages)
+				self.assertEqual((11, "First chat"), watcher._lastChatTitle)
+		# A genuine title change in the main document still interrupts immediately,
+		# even while the focus ancestry describes the secondary interface.
+		self.document.name = "Second chat"
+		watcher._checkChatTitle(checkArchive=False)
+		self.assertEqual([self.now], self.cancellations)
+		plugin._chatTitleTimer.callback()
+		self.assertEqual([("Second chat", "Second chat")], self.messages)
 
 	def test_focus_in_another_window_or_process_uses_the_requested_window_tree(self):
 		self._startWatcher("en")
@@ -199,6 +219,26 @@ class ChatTitleTests(unittest.TestCase):
 		plugin._chatTitleTimer.callback()
 		self.assertEqual([("Third chat", "Third chat")], self.messages)
 
+	def test_same_chat_is_not_reannounced_after_the_old_two_second_window(self):
+		_, plugin = self._startWatcher("en")
+		plugin._announceChatOpened("Second chat", self.window.windowHandle)
+		plugin._chatTitleTimer.callback()
+		self.now += 30
+		self.cancellations.clear()
+		plugin._latestMessage = plugin._latestFullMessage = "Current activity"
+		plugin._announceChatOpened(" Second CHAT ", self.window.windowHandle)
+		self.assertEqual([("Second chat", "Second chat")], self.messages)
+		self.assertEqual([], self.cancellations)
+		self.assertIsNone(plugin._chatTitleTimer)
+		self.assertEqual("Current activity", plugin._latestMessage)
+
+	def test_returning_to_a_previous_chat_still_announces_it(self):
+		_, plugin = self._startWatcher("en")
+		for title in ("First chat", "Second chat", "First chat"):
+			plugin._announceChatOpened(title, self.window.windowHandle)
+			plugin._chatTitleTimer.callback()
+		self.assertEqual([(title, title) for title in ("First chat", "Second chat", "First chat")], self.messages)
+
 	def test_unready_browse_buffer_delays_the_title_with_a_deadline(self):
 		_, plugin = self._startWatcher("en")
 		plugin._announceChatOpened("Second chat", self.window.windowHandle)
@@ -255,3 +295,14 @@ class ChatTitleTests(unittest.TestCase):
 		watcher._titleWatch.callback()
 		plugin._chatTitleTimer.callback()
 		self.assertEqual([], self.messages)
+
+	def test_background_title_does_not_suppress_its_later_foreground_announcement(self):
+		watcher, plugin = self._startWatcher("en")
+		self.foreground = SimpleNamespace(windowHandle=20)
+		plugin._announceChatOpened("Second chat", self.window.windowHandle)
+		self.assertIsNone(plugin._chatTitleTimer)
+		self.foreground = self.window
+		plugin._announceChatOpened("Second chat", self.window.windowHandle)
+		self.assertIsNotNone(plugin._chatTitleTimer)
+		plugin._chatTitleTimer.callback()
+		self.assertEqual([("Second chat", "Second chat")], self.messages)

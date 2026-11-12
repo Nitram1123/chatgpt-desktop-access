@@ -6,6 +6,24 @@ follows stable NVDA.
 
 ## Unreleased
 
+- Recent-message review follows NVDA's browse caret in browse mode and its
+  focused composer in focus mode, even when keyboard focus remains in another
+  pane. It loads the active transcript's end before reading and cancels a
+  pending read when its conversation context changes.
+- Repeated review shortcuts share one pending buffer refresh. Failed setup
+  releases its observer and timers; intermediate scroll events keep waiting
+  within a bounded deadline.
+- Background ChatGPT surfaces no longer replace the active conversation or
+  steal NVDA focus. IA2 and UIA events are filtered before native focus changes,
+  using the actual Windows foreground owner and retaining native acceptance
+  rules for real window switches and owned dialogs.
+- Main-window title tracking ignores secondary documents and buffer recreation.
+  Repeated reports of the same title do not interrupt speech again, and a title
+  detected in the background can still be announced when its window is active.
+- Project and Recents navigation handles deeper IA2 layouts, nested section
+  controls and project menus. It leaves full view and Activity view, opens the
+  sidebar once, and waits for collapsed sections and delayed content to settle.
+- Announce when the sidebar is shown or hidden.
 - Removed the numbered prefix from Control+1 through Control+0 announcements.
   Review reads the author and message text directly.
 - Fixed Control+1 through Control+0 reading an old message or a message from
@@ -15,11 +33,20 @@ follows stable NVDA.
   previous speech and briefly suppressing native focus speech during navigation.
   Focus events and document-name changes check the title immediately, with the
   existing document watcher retained as a fallback. The title lookup uses
-  NVDA's focus ancestry when it belongs to the requested window, and pending
+  the main window's document, independently of focus ancestry, and pending
   titles are read as soon as native focus handling finishes, without a fixed delay.
 
 ### What to test
 
+- Leave keyboard focus in one conversation pane, then use browse navigation in
+  another. Control+1 must read the reading pane's newest message without needing
+  to activate its latest-response heading. In focus mode, its editor takes priority.
+- Scroll far up with an unsent draft, then press Control+1 and Control+2 quickly.
+  Check that the requested newest turn is read after loading and the draft is kept.
+- Switch panes, chats, or applications during a pending read; it must not read
+  from the wrong context. Leave the mascot visible and watch for false focus changes.
+- Use project and Recents navigation with full view, Activity view, a closed sidebar,
+  and expanded/collapsed sections in both English and French.
 - With a main chat and a parallel discussion open, focus each message field
   and use Control+1 and Control+2. Check that each reads its own newest messages.
   Repeat after a new message arrives and in both focus and browse modes.

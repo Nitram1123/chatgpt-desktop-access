@@ -170,7 +170,7 @@ unassigned action can be given a gesture if wanted.
 
 NVDA+Shift+C reads the current chat title. When you switch chats, the add-on
 interrupts the previous speech and announces only the new title. It reads the
-outer document from NVDA's focus ancestry when available, and announces after
+outer document from the main application window, and announces after
 native focus handling completes. Native focus speech is briefly suppressed
 throughout the transition so it does not cover the
 title. Keyboard input ends that suppression, and speech in other apps is
@@ -186,10 +186,15 @@ Control+1 through Control+0 review the ten most recent user or ChatGPT messages:
   message.
 
 Review announces the author and message text directly, without a numbered prefix.
+If the conversation is scrolled up, review first scrolls that pane to the bottom
+and waits for NVDA's updated content. Keyboard focus and unsent drafts are kept.
+Changing conversations, panes, or applications cancels a pending review.
 
 Each position is a separately named action. These shortcuts work in both focus
 mode and browse mode. In forked and side conversations, review follows the
-conversation containing the focused message field. Each request refreshes a
+conversation containing NVDA's reading position in browse mode, and the focused
+message field in focus mode. A stale keyboard focus in another pane does not
+override the browse caret. Each request refreshes a
 bounded range of that conversation, so new messages are available immediately
 and adjacent conversation panes are kept separate.
 

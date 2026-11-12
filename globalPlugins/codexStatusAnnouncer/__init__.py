@@ -26,7 +26,8 @@ import versionInfo
 import winUser
 import wx
 from controlTypes import OutputReason, Role, State
-from NVDAObjects.UIA import UIATextInfo
+from NVDAObjects.IAccessible import IAccessible
+from NVDAObjects.UIA import UIA, UIATextInfo
 from treeInterceptorHandler import RootProxyTextInfo
 from gui import guiHelper
 from gui.settingsDialogs import NVDASettingsDialog, SettingsPanel
@@ -43,6 +44,10 @@ from .attachmentMenuDialog import AttachmentMenuDialog
 from .chatHistoryDialog import ChatHistoryDialog
 from .messageListDialog import MessageListDialog
 from .bufferUpdates import BufferUpdateObserver
+from .recentMessages import (
+	RecentMessageReview, activeConversationContainer, conversationContainer,
+	conversationScrollPattern, findConversationPrompt,
+)
 from .core import AnnouncementHistory, CATEGORY_SETTING, ChatMessageAccumulator, ChatMessageFieldCollector, announcementPriority, attachmentMenuItemLabel, brailleStatusMessage, brailleTypingGestureCommitsText, bufferInspectionDue, categoryOutputActions, changelogForDisplay, chatActionMatches, chatHistorySnapshotDecision, chatTitleMatches, codexHistorySourceSignature, codexThreadUrl, coalescedPollDelay, completedTextDelta, confirmedUserMessageSubmission, conversationModeFromDocumentNames, conversationModeFromSwitchControl, conversationWindowShouldDetach, currentActivitySummary, duplicateChannelActions, firstStatusLabel, focusStateTransition, formatCommandSpeech, formatCustomAnnouncement, formatElapsedDuration, intermediateCompletionCategory, isBrailleTypingGestureIdentifier, isChatHistoryConversationBoundary, attachmentOptionKeyStep, attachmentPopupOptions, findAttachmentOption, promptTextAddition, isChatHistoryInterfaceText, isCodexPromptLabel, isConversationNavigationGestureIdentifier, isKnownNonStatusButton, isPermissionDecisionLabel, isPermissionPromptText, isPromptSubmissionGestureIdentifier, isResponseCompletionMarkerText, isStopControlLabel, isTaskCompletionLabel, loadActiveCodexThreadTitles, mergeConversationTail, loadArchivedThreads, looksLikeBlankCodexConversation, looksLikeCodexConversation, mergeSupportedAppNames, modeSpecificRecentChatTitles, nextBusyState, outputActions, pendingChatTitle, pluginInstallProgress, pluginProgressBusyTransition, pollDelay, previewSelection, promptControlKind, promptSubmissionGestureShouldStart, redactSensitive, repairConfigurationValues, responseCompletionScanMarker, responseCompletionTransition, shouldFinalizeResponseCompletion, shouldLogDiagnosticSnapshot, shouldPlayContinuousWorkingClick, shouldPreserveBrailleComposition, shouldReplaceScheduledPoll, shouldSuppressNativeConversationUpdate, shouldSuppressRoutineBraille, shouldSuppressSemanticDuplicate, soundKey, statusDetails, statusMessage, stopControlTransition, supersedesResponseCompletionCandidate, uniqueThreadLabels, usageLimitNotice, userMessageNumber, userMessageSubmissionTransition, viewerTitleMatches
 from .core import voiceControlKind
 from .core import (
@@ -1422,6 +1427,45 @@ def _isNativeCommonDialogObject(obj):
 		return False
 
 
+def _isOtherChatGPTWindow(obj):
+	"""Reject another ChatGPT window's events while the foreground chat is active."""
+	try:
+		# NVDA's foreground object has not necessarily been updated when native
+		# focus acceptance is checked. Windows is authoritative during Alt+Tab.
+		foregroundWindow = winUser.getForegroundWindow()
+		window = getattr(obj, "windowHandle", 0)
+		if not window or not foregroundWindow:
+			return False
+		if winUser.getWindowThreadProcessID(foregroundWindow)[0] != obj.processID:
+			return False
+		owner = winUser.getAncestor(window, winUser.GA_ROOTOWNER) or window
+		foregroundOwner = winUser.getAncestor(foregroundWindow, winUser.GA_ROOTOWNER) or foregroundWindow
+		return owner != foregroundOwner
+	except Exception:
+		return False
+
+class ChatGPTIAccessibleFocusGuard(IAccessible):
+	"""Reject a background Electron surface before NVDA changes its focus."""
+
+	_cache_shouldAllowIAccessibleFocusEvent = False
+
+	def _get_shouldAllowIAccessibleFocusEvent(self):
+		if _isOtherChatGPTWindow(self):
+			log.debug("ChatGPT Desktop Access rejected background IAccessible focus: hwnd=%s", self.windowHandle)
+			return False
+		return super().shouldAllowIAccessibleFocusEvent
+
+class ChatGPTUIAFocusGuard(UIA):
+	"""Apply the same early check to objects exposed through UI Automation."""
+
+	_cache_shouldAllowUIAFocusEvent = False
+
+	def _get_shouldAllowUIAFocusEvent(self):
+		if _isOtherChatGPTWindow(self):
+			log.debug("ChatGPT Desktop Access rejected background UIA focus: hwnd=%s", self.windowHandle)
+			return False
+		return super().shouldAllowUIAFocusEvent
+
 class CodexPromptControlOverlay:
 	"""Add concise help to recognized native controls beside the Codex prompt."""
 
@@ -1457,6 +1501,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		try:
 			if not _isChatGPTObject(obj):
 				return
+			# App/global gainFocus handlers run after api.setFocusObject and the
+			# focusEntered announcements. Filter at the native acceptance hook instead.
+			if isinstance(obj, IAccessible):
+				clsList.insert(0, ChatGPTIAccessibleFocusGuard)
+			elif isinstance(obj, UIA):
+				clsList.insert(0, ChatGPTUIAFocusGuard)
 			# Known prompt-toolbar controls are much more common than embedded
 			# browser controls. Handle them without an unnecessary ancestor walk.
 			if obj.role in (Role.BUTTON, Role.COMBOBOX):
@@ -1498,6 +1548,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._latestFullMessage = ""
 		self._haveBaseline = False
 		self._buffer = None
+		self._recentMessageReview = RecentMessageReview(
+			wx.CallLater, BufferUpdateObserver, self._speakRecentChatMessage, self._recentMessageContextIsCurrent,
+		)
 		self._nativeTimerObserver = BufferUpdateObserver(self._observeNativeTaskTimer)
 		self._nativeTimerDocument = ""
 		self._nativeTimerSeconds = None
@@ -1679,6 +1732,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		self._pendingTitleAnnouncement = None
 		self._chatTitleSpeechQuietUntil = 0.0
 		global _activePluginInstance
+		self._recentMessageReview.cancel()
 		self._nativeTimerObserver.detach()
 		self._clearNativeTaskTimer()
 		if self._busyTimeout is not None:
@@ -2037,6 +2091,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		ui.message(label)
 
 	def _bindNativeTaskTimer(self, buffer):
+		self._recentMessageReview.cancel()
 		self._clearNativeTaskTimer()
 		self._nativeTimerDocument = ""
 		self._nativeTimerObserver.attach(buffer)
@@ -2114,15 +2169,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		branchStart = None
 		if anchor is not None:
 			try:
-				container = anchor.parent
-				for _depth in range(12):
-					if container is None or container.role == Role.DOCUMENT:
-						break
-					if "thread-scroll-container" in _domClassNames(container).split():
-						branchStart = self._buffer.makeTextInfo(container)
-						branchStart.collapse()
-						break
-					container = container.parent
+				container = conversationContainer(anchor, _domClassNames)
+				if container is not None:
+					branchStart = self._buffer.makeTextInfo(container)
+					branchStart.collapse()
 			except Exception:
 				# Older app builds may not expose a conversation container.
 				branchStart = None
@@ -2152,6 +2202,42 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			scanCharacters = min(scanCharacters * 2, RECENT_CHAT_MAX_SCAN_CHARACTERS)
 
 	def _readRecentChatMessage(self, position):
+		try:
+			self._rememberBuffer(api.getFocusObject(), allowUnclassifiedConversation=True)
+			prompt = self._findChatGPTPromptObject()
+			container = conversationContainer(prompt, _domClassNames)
+			if container is not None and self._buffer is not None:
+				window = winUser.getAncestor(container.windowHandle, winUser.GA_ROOT)
+				if winUser.getForegroundWindow() != window:
+					self._recentMessageReview.cancel()
+					return
+				pattern = conversationScrollPattern(container, window, _domClassNames)
+				if pattern is not None:
+					log.debug("ChatGPT Desktop Access reviewing message %d at scroll percent %.3f", position, pattern.CurrentVerticalScrollPercent)
+					context = self._buffer, prompt, window, self._buffer.rootNVDAObject.name
+					try:
+						self._recentMessageReview.request(position, context, pattern)
+					except Exception:
+						log.debugWarning("ChatGPT Desktop Access could not scroll to recent messages", exc_info=True)
+						ui.message(_("Recent chat messages could not be read"))
+					return
+		except Exception:
+			log.debugWarning("ChatGPT Desktop Access could not prepare recent-message scrolling", exc_info=True)
+		self._recentMessageReview.cancel()
+		self._speakRecentChatMessage(position)
+
+	def _recentMessageContextIsCurrent(self, context):
+		buffer, prompt, window, title = context
+		valid = (
+			self._buffer is buffer
+			and winUser.getForegroundWindow() == window
+			and buffer.rootNVDAObject.name == title
+			and _sameNVDAObject(self._findChatGPTPromptObject(), prompt)
+		)
+		log.debug("ChatGPT Desktop Access pending message review context valid=%s", valid)
+		return valid
+
+	def _speakRecentChatMessage(self, position):
 		try:
 			messages = self._currentChatMessages()
 		except Exception:
@@ -3061,7 +3147,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def _rememberConversationWindowFromEvent(self, obj):
 		"""Track ChatGPT's owner window before its virtual buffer becomes available."""
-		if not _isChatGPTObject(obj):
+		if not _isChatGPTObject(obj) or _isOtherChatGPTWindow(obj):
 			return False
 		try:
 			handle = int(getattr(obj, "windowHandle", 0) or 0)
@@ -4111,7 +4197,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		return None
 
 	def _schedulePopupDialogFocus(self, obj):
-		if not self._appFocusState or not _isChatGPTObject(obj):
+		if not self._appFocusState or not _isChatGPTObject(obj) or _isOtherChatGPTWindow(obj):
 			return
 		try:
 			dialog = self._popupDialogFromObject(obj)
@@ -4371,12 +4457,21 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def _findChatGPTPromptObject(self):
 		candidates = []
+		activeContainer = None
 		try:
-			candidates.append(api.getFocusObject())
+			focus = api.getFocusObject()
+			candidates.append(focus)
+			activeContainer = activeConversationContainer(self._buffer, focus, _domClassNames)
 		except Exception:
 			pass
 		candidates.extend((self._lastPromptObject, self._pendingPromptObject))
 		for candidate in tuple(candidates):
+			if activeContainer is not None:
+				try:
+					if not _sameNVDAObject(conversationContainer(candidate, _domClassNames), activeContainer):
+						continue
+				except Exception:
+					continue
 			current = candidate
 			for _ in range(8):
 				if current is None:
@@ -4389,6 +4484,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 					current = getattr(current, "parent", None)
 				except Exception:
 					break
+		if activeContainer is not None:
+			return findConversationPrompt(activeContainer, _isCodexPromptObject)
 		if self._buffer is not None:
 			try:
 				position = self._buffer.makeTextInfo(textInfos.POSITION_LAST)
@@ -4529,14 +4626,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def _announceChatOpened(self, title, windowHandle):
 		# History and the document watcher can report the same chat switch.
+		key = windowHandle, " ".join(title.casefold().split())
+		previous = self._lastChatOpened
+		if title and previous is not None and previous[0] == key:
+			return
 		message = title if title else _("New chat opened")
 		self._latestMessage = self._latestFullMessage = message
 		now = time.monotonic()
-		key = windowHandle, " ".join(title.casefold().split())
-		previous = self._lastChatOpened
-		if title and previous is not None and previous[0] == key and now - previous[1] < 2.0:
-			return
-		self._lastChatOpened = key, now
 		if self._chatTitleTimer is not None:
 			self._chatTitleTimer.Stop()
 		window = api.getForegroundObject()
@@ -4544,6 +4640,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			self._chatTitleTimer = None
 			self._pendingTitleAnnouncement = None
 			return
+		self._lastChatOpened = key, now
 		self._pendingTitleAnnouncement = message, windowHandle
 		self._chatTitleSpeechWindowHandle = windowHandle
 		if self._chatTitleSpeechEnabled():
@@ -4581,7 +4678,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def _checkChatTitleBeforeFocus(self, obj):
 		try:
-			if not _isChatGPTObject(obj):
+			if not _isChatGPTObject(obj) or _isOtherChatGPTWindow(obj):
 				return
 			check = getattr(getattr(obj, "appModule", None), "_checkChatTitle", None)
 			if check is not None:
@@ -4589,8 +4686,28 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		except Exception:
 			log.debugWarning("ChatGPT Desktop Access could not check the chat title before focus speech", exc_info=True)
 
+	def _confirmChatOpenedInRetainedBuffer(self, buffer):
+		title = pendingChatTitle(
+			self._pendingOpenedChatTitle, time.monotonic() - self._pendingOpenedChatAt,
+		)
+		if not title:
+			self._pendingOpenedChatTitle = ""
+			self._pendingOpenedChatAt = 0.0
+			return
+		try:
+			documentTitle = buffer.rootNVDAObject.name
+		except Exception:
+			return
+		if not chatTitleMatches(title, documentTitle):
+			return
+		self._pendingOpenedChatTitle = ""
+		self._pendingOpenedChatAt = 0.0
+		self._documentSwitchCount += 1
+		self._resetTaskState("chat changed within the retained buffer")
+		self._announceChatOpened(title, self._conversationWindowHandle)
+
 	def _rememberBuffer(self, obj, allowUnclassifiedConversation=False):
-		if not _isChatGPTObject(obj):
+		if not _isChatGPTObject(obj) or _isOtherChatGPTWindow(obj):
 			return False
 		if _isNativeCommonDialogObject(obj):
 			# The Windows Select files dialog is owned by ChatGPT.exe, but has no
@@ -4618,7 +4735,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				# Mode events are handled independently. Navigation inside the
 				# retained document needs only a cheap live-window check, not
 				# repeated mode/browser ancestry queries for every focused control.
-				return self._conversationWindowIsAvailable(self._conversationWindowHandle)
+				if not self._conversationWindowIsAvailable(self._conversationWindowHandle):
+					return False
+				if getattr(self, "_pendingOpenedChatTitle", ""):
+					self._confirmChatOpenedInRetainedBuffer(buffer)
+				return True
 			if mode is None:
 				explicitMode = _switchControlMode(obj)
 				mode = _conversationModeForObject(obj)
@@ -4678,25 +4799,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				)
 				self._pendingOpenedChatTitle = ""
 				self._pendingOpenedChatAt = 0.0
-				bufferSampleComplete = False
-				try:
-					# The end of the document contains the prompt and newest turns. Reading
-					# only a bounded tail is sufficient to distinguish a blank chat and avoids
-					# copying an entire large transcript on NVDA's main thread merely because
-					# Chromium rebuilt its virtual-buffer object.
-					position = buffer.makeTextInfo(textInfos.POSITION_LAST)
-					moved = _extendScanStart(position, BUFFER_TAIL_SCAN_CHARACTERS)
-					bufferText = position.text
-					# Absence of message markers proves the chat is blank only when this
-					# bounded range reached the document start. A truncated long response
-					# may legitimately have its speaker heading outside the sampled tail.
-					bufferSampleComplete = abs(moved) < BUFFER_TAIL_SCAN_CHARACTERS
-				except Exception:
-					bufferText = ""
-				conversationChanged = bool(
-					title or (bufferSampleComplete and looksLikeBlankCodexConversation(bufferText))
-				)
-				if conversationChanged:
+				# Rebuilding a Chromium buffer is not proof of navigation. A partial
+				# or translated transcript can lack the old English message markers.
+				# The main-document title watcher handles native navigation; this path
+				# only announces an explicit, pending history selection.
+				if title:
 					self._documentSwitchCount += 1
 					self._resetTaskState("document changed")
 					self._announceChatOpened(title, candidateWindowHandle)

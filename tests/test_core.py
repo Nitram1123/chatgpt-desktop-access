@@ -6,11 +6,13 @@ import json
 import math
 import os
 from pathlib import Path
+from types import SimpleNamespace
 import re
 import struct
 import sys
 import tempfile
 import unittest
+import runpy
 import wave
 
 
@@ -305,6 +307,7 @@ class StatusMessageTests(unittest.TestCase):
 			"isEmbeddedBrowserContainerText": browserAccess.isEmbeddedBrowserContainerText,
 			"isEmbeddedBrowserContainerRole": browserAccess.isEmbeddedBrowserContainerRole,
 			"isEmbeddedBrowserDocumentStructure": browserAccess.isEmbeddedBrowserDocumentStructure,
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=functions, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		class Object:
@@ -368,9 +371,12 @@ class StatusMessageTests(unittest.TestCase):
 			"promptControlKind": lambda name: "",
 			"CodexPromptControlOverlay": object,
 			"CodexPromptEditableTextOverlay": overlayClass,
+			"IAccessible": type("IAccessible", (), {}),
+			"UIA": type("UIA", (), {}),
 			"CodexEmbeddedBrowserOverlay": object,
 			"_settings": lambda: {"enhanceEmbeddedBrowser": False},
 			"_embeddedBrowserKind": lambda obj: "",
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=[chooseMethod], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		prompt = type("Object", (), {"role": RoleStub.EDITABLETEXT, "isPrompt": True})()
@@ -478,7 +484,7 @@ class StatusMessageTests(unittest.TestCase):
 		for language in languages:
 			self.assertIn(f"locale/{language}/LC_MESSAGES/nvda.mo", paths)
 			self.assertIn(f"locale/{language}/manifest.ini", paths)
-		self.assertEqual(66 + 2 * len(languages), len(paths))
+		self.assertEqual(67 + 2 * len(languages), len(paths))
 		self.assertIn("globalPlugins/codexStatusAnnouncer/attachmentDiagnostics.py", paths)
 		self.assertIn("globalPlugins/codexStatusAnnouncer/attachmentMenuDialog.py", paths)
 		self.assertEqual(51, sum(path.endswith(".wav") for path in paths))
@@ -858,6 +864,7 @@ class StatusMessageTests(unittest.TestCase):
 			"_isChatGPTObject": lambda obj: True,
 			"promptControlKind": lambda name: "",
 			"log": type("Log", (), {"debugWarning": staticmethod(lambda *args, **kwargs: None)})(),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		subject = Subject()
@@ -1027,6 +1034,7 @@ class StatusMessageTests(unittest.TestCase):
 				"info": staticmethod(lambda *args, **kwargs: None),
 				"debugWarning": staticmethod(lambda *args, **kwargs: None),
 			})(),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 
@@ -1429,6 +1437,7 @@ class StatusMessageTests(unittest.TestCase):
 			"_settings": lambda: settings,
 			"_send": send,
 			"log": type("Log", (), {"debug": staticmethod(lambda *args, **kwargs: None), "info": staticmethod(lambda *args, **kwargs: None)}),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(
 			compile(ast.Module(body=list(methods.values()), type_ignores=[]), str(PLUGIN_PATH), "exec"),
@@ -1622,6 +1631,7 @@ class StatusMessageTests(unittest.TestCase):
 				"debugWarning": staticmethod(lambda *args, **kwargs: None),
 				"info": staticmethod(lambda *args, **kwargs: None),
 			}),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		class Subject:
@@ -1845,6 +1855,7 @@ class StatusMessageTests(unittest.TestCase):
 			"conversationModeFromDocumentNames": conversationModeFromDocumentNames,
 			"isEmbeddedBrowserContainerText": browserAccess.isEmbeddedBrowserContainerText,
 			"isEmbeddedBrowserContainerRole": browserAccess.isEmbeddedBrowserContainerRole,
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=functions, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		class RoleName:
@@ -1872,6 +1883,7 @@ class StatusMessageTests(unittest.TestCase):
 			"_isChatGPTObject": lambda obj: True,
 			"_isConversationObject": lambda obj: bool(getattr(obj, "conversation", False)),
 			"_isCodexPromptObject": lambda obj: bool(getattr(obj, "prompt", False)),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		currentBuffer = object()
@@ -2263,6 +2275,7 @@ class StatusMessageTests(unittest.TestCase):
 			"re": re,
 			"usageLimitNotice": usageLimitNotice,
 			"_": lambda text: text,
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 
@@ -2730,6 +2743,7 @@ class StatusMessageTests(unittest.TestCase):
 			"log": type("Log", (), {"debugWarning": staticmethod(lambda *args, **kwargs: None)}),
 			"CHAT_HISTORY_OPEN_RETRY_MILLISECONDS": 150,
 			"CHAT_HISTORY_OPEN_TIMEOUT_SECONDS": 5.0,
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		class Subject:
@@ -2806,6 +2820,7 @@ class StatusMessageTests(unittest.TestCase):
 				getattr(obj, "name", ""), "", getattr(obj, "role", ""), False,
 			),
 			"_roleName": lambda obj: getattr(obj, "role", ""),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		class Subject:
@@ -2874,7 +2889,7 @@ class StatusMessageTests(unittest.TestCase):
 			type("ConversationControl", (), {"windowHandle": 10})(),
 		))
 
-	def test_buffer_backend_refresh_preserves_task_state_but_blank_chat_resets_it(self):
+	def test_buffer_refresh_requires_a_confirmed_chat_open_before_resetting_task_state(self):
 		pluginTree = ast.parse(PLUGIN_PATH.read_text(encoding="utf-8"))
 		pluginClass = next(
 			node for node in pluginTree.body
@@ -2889,7 +2904,6 @@ class StatusMessageTests(unittest.TestCase):
 		method = next(node for node in methods if node.name == "_rememberBuffer")
 		methodSource = ast.get_source_segment(PLUGIN_PATH.read_text(encoding="utf-8"), method)
 		self.assertIn("POSITION_LAST", methodSource)
-		self.assertIn("_extendScanStart(position, BUFFER_TAIL_SCAN_CHARACTERS)", methodSource)
 		self.assertNotIn("makeTextInfo(textInfos.POSITION_ALL)", methodSource)
 		self.assertLess(
 			methodSource.index("_conversationWindowIsAvailable"),
@@ -2977,6 +2991,7 @@ class StatusMessageTests(unittest.TestCase):
 			"_": lambda text: text,
 			"log": type("Log", (), {"info": lambda *args, **kwargs: None, "debug": lambda *args, **kwargs: None})(),
 			"_settings": lambda: {"speech": True, "braille": True}, "_send": lambda *args, **kwargs: None,
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		oldBuffer = Buffer("Do anything ChatGPT said: existing answer")
@@ -2999,14 +3014,26 @@ class StatusMessageTests(unittest.TestCase):
 		self.assertEqual(2, subject._documentSwitchCount)
 		blankBuffer = Buffer("Main landmark Do anything New chat")
 		namespace["_rememberBuffer"](subject, type("Object", (), {"treeInterceptor": blankBuffer})())
+		self.assertEqual([], subject.resets)
+		self.assertEqual([], subject.spoken)
+		self.assertEqual(2, subject._documentSwitchCount)
+		# A recreated or translated buffer can lack all legacy English markers.
+		for text in ("Conversation Travaillez avec Codex", "Main landmark Do anything New chat"):
+			namespace["_rememberBuffer"](subject, type("Object", (), {"treeInterceptor": Buffer(text)})())
+		self.assertEqual([], subject.resets)
+		self.assertEqual([], subject.spoken)
+		# An explicit history selection remains a valid confirmation.
+		subject._pendingOpenedChatTitle = "Selected chat"
+		subject._pendingOpenedChatAt = 99.0
+		namespace["_rememberBuffer"](subject, type("Object", (), {"treeInterceptor": blankBuffer})())
 		self.assertEqual(["document changed"], subject.resets)
-		self.assertEqual(["New chat opened"], subject.spoken)
+		self.assertEqual(["Selected chat"], subject.spoken)
 		self.assertEqual(3, subject._documentSwitchCount)
 		subject._announceChatOpened("Project discussion", 1234)
 		subject._announceChatOpened("Project discussion", 1234)
 		subject._announceChatOpened("Other chat", 1234)
 		self.assertEqual([
-			"New chat opened", "Project discussion", "Other chat",
+			"Selected chat", "Project discussion", "Other chat",
 		], subject.spoken)
 		longBuffer = Buffer("Main landmark Do anything " + ("response body " * 900))
 		longSubject = Subject(refreshedBuffer)
@@ -3517,6 +3544,7 @@ class StatusMessageTests(unittest.TestCase):
 			"CHAT_HISTORY_EXPANSION_MAX_STALE_SCANS": 30,
 			"CHAT_HISTORY_EXPANSION_RETRY_MILLISECONDS": 300,
 			"CHAT_HISTORY_EXPANSION_DELAY_MILLISECONDS": 700,
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		continueExpansion = namespace["_continueChatHistoryExpansion"]
@@ -4078,6 +4106,7 @@ class StatusMessageTests(unittest.TestCase):
 			setattr(Subject, name, namespace[name])
 		subject = Subject()
 		subject._nativeTimerObserver = namespace["BufferUpdateObserver"](subject._observeNativeTaskTimer)
+		subject._recentMessageReview = SimpleNamespace(cancel=lambda: None)
 		buffer = subject._buffer
 		subject._bindNativeTaskTimer(buffer)
 		self.assertEqual([], timers)
@@ -4283,11 +4312,14 @@ class StatusMessageTests(unittest.TestCase):
 			}),
 			"RECENT_CHAT_INITIAL_SCAN_CHARACTERS": 32768,
 			"_extendScanStart": lambda info, count: info.move("character", -count, endPoint="start"),
+			"conversationContainer": runpy.run_path(str(PLUGIN_PATH.with_name("recentMessages.py")))["conversationContainer"],
+			"_domClassNames": lambda obj: "",
 			"RECENT_CHAT_MAX_SCAN_CHARACTERS": 524288,
 			"ChatMessageAccumulator": ChatMessageAccumulator,
 			"MESSAGE_LIST_LIMIT": 100,
 			"ChatMessageFieldCollector": ChatMessageFieldCollector,
 			"isCodexPromptLabel": isCodexPromptLabel,
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		for name in methodNames:
@@ -4895,6 +4927,7 @@ class StatusMessageTests(unittest.TestCase):
 			"conversationWindowShouldDetach": conversationWindowShouldDetach,
 			"CONVERSATION_WINDOW_CLOSE_GRACE_SECONDS": 2.0,
 			"log": type("Log", (), {"info": lambda *args, **kwargs: None})(),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		subject = Subject()
@@ -5008,6 +5041,7 @@ class StatusMessageTests(unittest.TestCase):
 			"wx": Wx,
 			"log": Log,
 			"_isChatGPTObject": isChatGPTObject,
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		class Subject:
@@ -5133,6 +5167,7 @@ class StatusMessageTests(unittest.TestCase):
 			"wx": Wx,
 			"log": Log,
 			"_isChatGPTObject": lambda obj: obj is chat,
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		class Subject:
@@ -5189,6 +5224,7 @@ class StatusMessageTests(unittest.TestCase):
 			"State": type("State", (), {"DEFUNCT": object()}),
 			"winUser": WinUser,
 			"_isChatGPTObject": lambda obj: False,
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		class Subject:
@@ -5234,6 +5270,7 @@ class StatusMessageTests(unittest.TestCase):
 				getattr(obj, "name", ""), "", "button", False,
 			),
 			"log": type("Log", (), {"debug": lambda *args, **kwargs: None})(),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		class Subject:
@@ -5583,11 +5620,14 @@ class StatusMessageTests(unittest.TestCase):
 			"CONVERSATION_NAVIGATION_QUIET_SECONDS": 3.0,
 			"RECENT_CHAT_INITIAL_SCAN_CHARACTERS": 32768,
 			"_extendScanStart": lambda info, count: info.move("character", -count, endPoint="start"),
+			"conversationContainer": runpy.run_path(str(PLUGIN_PATH.with_name("recentMessages.py")))["conversationContainer"],
+			"_domClassNames": lambda obj: "",
 			"_activePluginInstance": None,
 			"log": type("Log", (), {
 				"info": staticmethod(lambda *args, **kwargs: None),
 				"debugWarning": staticmethod(lambda *args, **kwargs: None),
 			})(),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		for name in methodNames:
@@ -5919,6 +5959,7 @@ class StatusMessageTests(unittest.TestCase):
 			"isPermissionPromptText": lambda text: False,
 			"isPermissionDecisionLabel": lambda text: False,
 			"log": Log,
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		sameObject = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_sameNVDAObject")
 		exec(compile(ast.Module(body=[sameObject, method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
@@ -6418,6 +6459,7 @@ class StatusMessageTests(unittest.TestCase):
 			"statusDetails": statusDetails,
 			"Role": Roles,
 			"log": Logger(),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 
@@ -6640,7 +6682,7 @@ class StatusMessageTests(unittest.TestCase):
 			"event_alert", "event_textChange",
 			"_observeConversationModeControl", "_attachmentMenuSelectionState",
 		)
-		namespace = {"_isChatGPTObject": lambda obj: False}
+		namespace = {"_isChatGPTObject": lambda obj: False, "_isOtherChatGPTWindow": lambda obj: False}
 		for method in pluginClass.body:
 			if isinstance(method, ast.FunctionDef) and method.name in methodNames:
 				exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
@@ -6842,6 +6884,7 @@ class StatusMessageTests(unittest.TestCase):
 			"_conversationModeForObject": expensiveQuery,
 			"_isCodexPromptObject": expensiveQuery,
 			"_isEmbeddedBrowserObject": expensiveQuery,
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		buffer = object()
@@ -6903,6 +6946,7 @@ class StatusMessageTests(unittest.TestCase):
 				"info": staticmethod(lambda *args, **kwargs: None),
 				"debugWarning": staticmethod(lambda *args, **kwargs: None),
 			}),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		class Subject:
@@ -7238,6 +7282,7 @@ class StatusMessageTests(unittest.TestCase):
 				"debugWarning": staticmethod(lambda *args, **kwargs: None),
 				"info": staticmethod(lambda *args, **kwargs: None),
 			}),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=methods, type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		buffer = Buffer()
@@ -7565,6 +7610,7 @@ class StatusMessageTests(unittest.TestCase):
 			"ATTACHMENT_POPUP_SETTLE_ATTEMPTS": 4,
 			"log": type("Log", (), {"debugWarning": staticmethod(lambda *args, **kwargs: None)}),
 			"withAttachmentOptionTitles": core.withAttachmentOptionTitles,
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
 		shown = []
@@ -7612,6 +7658,7 @@ class StatusMessageTests(unittest.TestCase):
 				"debugWarning": staticmethod(lambda *args, **kwargs: (_ for _ in ()).throw(sys.exc_info()[1])),
 				"info": staticmethod(lambda *args, **kwargs: None),
 			}),
+			"_isOtherChatGPTWindow": lambda obj: False,
 		}
 		for method in methods:
 			exec(compile(ast.Module(body=[method], type_ignores=[]), str(PLUGIN_PATH), "exec"), namespace)
